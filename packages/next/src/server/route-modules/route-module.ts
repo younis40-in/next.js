@@ -8,6 +8,7 @@ import type { ParsedUrlQuery } from 'node:querystring'
 import type { UrlWithParsedQuery } from 'node:url'
 import type {
   PrerenderManifest,
+  PrerenderManifestRuntime,
   PreviewPropsManifest,
   RequiredServerFilesManifest,
 } from '../../build'
@@ -215,7 +216,7 @@ export abstract class RouteModule<
     fallbackBuildManifest: BuildManifest
     routesManifest: DeepReadonly<DevRoutesManifest>
     nextFontManifest: DeepReadonly<NextFontManifest>
-    prerenderManifest: DeepReadonly<PrerenderManifest>
+    prerenderManifest: DeepReadonly<PrerenderManifestRuntime>
     serverFilesManifest: DeepReadonly<RequiredServerFilesManifest> | undefined
     reactLoadableManifest: DeepReadonly<ReactLoadableManifest>
     subresourceIntegrityManifest: any
@@ -245,7 +246,6 @@ export abstract class RouteModule<
           dynamicRoutes: {},
           notFoundRoutes: [],
           version: 4,
-          preview: getEdgePreviewProps(),
         } as const,
         previewProps: getEdgePreviewProps(),
         routesManifest: {
@@ -319,8 +319,11 @@ export abstract class RouteModule<
         loadManifestFromRelativePath<PrerenderManifest>({
           projectDir,
           distDir: this.distDir,
-          manifest: PRERENDER_MANIFEST,
+          manifest: !this.isDev
+            ? `server/${router === 'app' ? 'app' : 'pages'}${normalizedPagePath}/${PRERENDER_MANIFEST}`
+            : PRERENDER_MANIFEST,
           shouldCache: !this.isDev,
+          handleMissing: true,
         }),
         loadManifestFromRelativePath<PreviewPropsManifest>({
           projectDir,
@@ -426,7 +429,8 @@ export abstract class RouteModule<
         fallbackBuildManifest,
         routesManifest,
         nextFontManifest,
-        prerenderManifest,
+        prerenderManifest:
+          prerenderManifest satisfies DeepReadonly<PrerenderManifestRuntime>,
         previewProps,
         serverFilesManifest,
         reactLoadableManifest,
@@ -489,7 +493,7 @@ export abstract class RouteModule<
     req: IncomingMessage | BaseNextRequest,
     nextConfig: NextConfigRuntime,
     previewProps: DeepReadonly<__ApiPreviewProps>,
-    prerenderManifest: DeepReadonly<PrerenderManifest>,
+    prerenderManifest: DeepReadonly<PrerenderManifestRuntime>,
     isMinimalMode: boolean
   ): Promise<IncrementalCache> {
     if (process.env.NEXT_RUNTIME === 'edge') {
@@ -660,7 +664,7 @@ export abstract class RouteModule<
           | undefined
         reactLoadableManifest: DeepReadonly<ReactLoadableManifest>
         routesManifest: DeepReadonly<DevRoutesManifest>
-        prerenderManifest: DeepReadonly<PrerenderManifest>
+        prerenderManifest: DeepReadonly<PrerenderManifestRuntime>
         // we can't pull in the client reference type or it causes issues with
         // our pre-compiled types
         clientReferenceManifest?: any
@@ -1164,7 +1168,7 @@ export abstract class RouteModule<
     routeKind: RouteKind
     isFallback?: boolean
     previewProps: DeepReadonly<__ApiPreviewProps>
-    prerenderManifest: DeepReadonly<PrerenderManifest>
+    prerenderManifest: DeepReadonly<PrerenderManifestRuntime>
     isRoutePPREnabled?: boolean
     isOnDemandRevalidate?: boolean
     revalidateOnlyGenerated?: boolean
