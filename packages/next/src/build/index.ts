@@ -83,6 +83,7 @@ import {
   FUNCTIONS_CONFIG_MANIFEST,
   DYNAMIC_CSS_MANIFEST,
   TURBOPACK_CLIENT_MIDDLEWARE_MANIFEST,
+  PREVIEW_PROPS_MANIFEST,
 } from '../shared/lib/constants'
 import {
   UNDERSCORE_NOT_FOUND_ROUTE,
@@ -406,6 +407,7 @@ export type PrerenderManifest = {
   routes: { [route: string]: PrerenderManifestRoute }
   dynamicRoutes: { [route: string]: DynamicPrerenderManifestRoute }
   notFoundRoutes: string[]
+  /** @deprecated only kept for the builder, use PreviewPropsManifest within Next.js itself */
   preview: __ApiPreviewProps
 }
 
@@ -499,6 +501,7 @@ function getPagesFallbackClassification(
 }
 
 export type SubresourceIntegrityManifest = Record<string, string>
+export type PreviewPropsManifest = __ApiPreviewProps
 
 type ManifestBuiltRoute = {
   /**
@@ -2004,6 +2007,7 @@ export default async function build(
               path.relative(distDir, pagesManifestPath),
               BUILD_MANIFEST,
               PRERENDER_MANIFEST,
+              path.join(SERVER_DIRECTORY, PREVIEW_PROPS_MANIFEST),
               path.join(SERVER_DIRECTORY, FUNCTIONS_CONFIG_MANIFEST),
               path.join(SERVER_DIRECTORY, MIDDLEWARE_MANIFEST),
               path.join(SERVER_DIRECTORY, MIDDLEWARE_BUILD_MANIFEST + '.js'),
@@ -4318,10 +4322,15 @@ export default async function build(
           version: 4,
           routes: {},
           dynamicRoutes: {},
-          preview: previewProps,
           notFoundRoutes: [],
+          preview: previewProps,
         })
       }
+
+      await writeManifest(
+        path.join(distDir, 'server', PREVIEW_PROPS_MANIFEST),
+        previewProps
+      )
 
       // #endregion
 
@@ -4453,6 +4462,7 @@ export default async function build(
               outputFileTracingRoot,
               hasNodeMiddleware,
               hasInstrumentationHook,
+              previewProps,
               adapterPath,
               pageKeys: pageKeys.pages,
               appPageKeys: emittedAppPageKeys,
