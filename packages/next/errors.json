@@ -1486,5 +1486,17 @@
   "1485": "Failed to install the WebSocket upgrade socket error owner",
   "1486": "Invalid raw HTTP response content length.",
   "1487": "First argument must be a valid error code number",
-  "1488": "Failed to install WebSocket upgrade socket backpressure listeners"
+  "1488": "Failed to install WebSocket upgrade socket backpressure listeners",
+  "1489": "NextResponse.upgrade() requires experimental.webSocketRouteHandlers to be enabled in next.config.js.",
+  "1490": "NextResponse.upgrade() is only supported in App Route Handlers and cannot be returned from proxy.ts.",
+  "1491": "NextResponse.upgrade() requires a hooks object.",
+  "1492": "NextResponse.upgrade() is not supported in the Edge Runtime.",
+  "1493": "NextResponse.upgrade() cannot set the protocol-critical \"%s\" header.",
+  "1494": "NextResponse.upgrade() hook \"%s\" must be a function.",
+  "1495": "WebSocket upgrade client disconnected.",
+  "1496": "Invalid %s in WebSocket upgrade response.",
+  "1497": "Route %s couldn't be rendered statically because it returned NextResponse.upgrade().",
+  "1498": "Invariant: CrossWS upgrade request is missing its App Route response.",
+  "1499": "WebSocket Route Handlers are unavailable because experimental.webSocketRouteHandlers is not enabled.",
+  "1500": "NextResponse.upgrade() does not support the \"%s\" hook."
 }
