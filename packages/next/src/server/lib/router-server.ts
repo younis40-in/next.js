@@ -73,7 +73,11 @@ import {
   isRequestInsightsEnabled,
 } from './trace/request-insights'
 import { fromNodeOutgoingHttpHeaders } from '../web/utils'
-import { writeRawHttpError, writeRawHttpResponse } from '../websocket-upgrade'
+import {
+  validateWebSocketHandshake,
+  writeRawHttpError,
+  writeRawHttpResponse,
+} from '../websocket-upgrade'
 import { closeAllWebSockets } from '../websocket-connection-registry'
 
 const debug = setupDebug('next:router-server:main')
@@ -907,6 +911,7 @@ export async function initialize(opts: {
     renderServerOpts,
     development?.bundler?.ensureMiddleware
   )
+  const webSocketRegistryScope = Symbol('next.websocket.router-server')
 
   const upgradeHandler: WorkerUpgradeHandler = async (req, socket, head) => {
     try {
@@ -918,6 +923,26 @@ export async function initialize(opts: {
         // TODO: log socket errors?
         // console.error(_err);
       })
+
+      // Upgrade requests bypass the ordinary request handler, so apply the
+      // same trust-boundary filtering before middleware or route resolution.
+      if (!process.env.NEXT_PRIVATE_TEST_HEADERS) {
+        filterInternalHeaders(req.headers)
+      }
+      addRequestMeta(req, 'webSocketUpgradeHeadersFiltered', true)
+      addRequestMeta(req, 'webSocketRegistryScope', webSocketRegistryScope)
+
+      const handshakeError = validateWebSocketHandshake(req)
+      if (handshakeError) {
+        await writeRawHttpError(
+          req,
+          socket,
+          handshakeError.status,
+          handshakeError.message,
+          handshakeError.headers
+        )
+        return
+      }
 
       if (opts.dev && development && req.url) {
         if (
@@ -1078,7 +1103,7 @@ export async function initialize(opts: {
     server: handlers.server,
     async closeUpgraded() {
       development?.bundler?.hotReloader?.close()
-      await closeAllWebSockets(1001)
+      await closeAllWebSockets(1001, webSocketRegistryScope)
     },
     distDir: config.distDir,
     experimentalFeatures,

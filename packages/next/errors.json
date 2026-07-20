@@ -1498,5 +1498,12 @@
   "1497": "Route %s couldn't be rendered statically because it returned NextResponse.upgrade().",
   "1498": "Invariant: CrossWS upgrade request is missing its App Route response.",
   "1499": "WebSocket Route Handlers are unavailable because experimental.webSocketRouteHandlers is not enabled.",
-  "1500": "NextResponse.upgrade() does not support the \"%s\" hook."
+  "1500": "NextResponse.upgrade() does not support the \"%s\" hook.",
+  "1501": "NextResponse.upgrade() allowedOrigins must be an array.",
+  "1502": "NextResponse.upgrade() protocol must be a valid WebSocket subprotocol token.",
+  "1503": "NextResponse.upgrade() allowed origin must be an HTTP(S) origin without credentials, path, query, or fragment: \"%s\".",
+  "1504": "NextResponse.upgrade() options must be an object.",
+  "1505": "NextResponse.upgrade() does not support the \"%s\" option.",
+  "1506": "NextResponse.upgrade() received an invalid allowed origin: \"%s\".",
+  "1507": "NextResponse.upgrade() allowedOrigins entries must be strings."
 }
