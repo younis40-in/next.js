@@ -1,5 +1,4 @@
 import type {
-  DynamicPrerenderManifestRoute,
   DynamicPrerenderManifestRouteRuntime,
   PrerenderManifestRuntime,
 } from '../../../../build'
@@ -33,7 +32,7 @@ type Matcher = {
 
 export type PrerenderManifestMatch = {
   source: string
-  route: DeepReadonly<DynamicPrerenderManifestRoute>
+  route: DeepReadonly<DynamicPrerenderManifestRouteRuntime>
 }
 
 /**
