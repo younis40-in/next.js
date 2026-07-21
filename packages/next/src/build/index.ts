@@ -3839,7 +3839,7 @@ export default async function build(
                   }
                 }
 
-                addPrerenderDynamicRoute(route.pathname, route.pathname, {
+                addPrerenderDynamicRoute(page, route.pathname, {
                   experimentalPPR: isRoutePPREnabled,
                   remainingPrerenderableParams:
                     route.remainingPrerenderableParams,
@@ -4116,7 +4116,7 @@ export default async function build(
 
                     const cacheControl = getCacheControl(localePage)
 
-                    addPrerenderRoute(page, localePage, {
+                    addPrerenderRoute(file, localePage, {
                       ...(!isNotFoundTrue && {
                         routeType: 'page' as const,
                         response: 'complete' as const,
