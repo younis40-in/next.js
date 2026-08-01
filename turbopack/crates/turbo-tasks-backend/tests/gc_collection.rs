@@ -32,6 +32,22 @@ fn leaf(n: u32) -> Vc<u32> {
     Vc::cell(n)
 }
 
+/// A distinct leaf keyed by `n`, used as the child of a persisted root in the cross-session tests
+/// so its collection can be observed independently of the shared `leaf`.
+#[turbo_tasks::function]
+fn orphan_leaf(n: u32) -> Vc<u32> {
+    Vc::cell(n)
+}
+
+/// A `(operation, root)` op that reads `orphan_leaf(n)` — a small "root -> subtree" used to test
+/// cross-session orphan collection. Read at the top level of a `run` it has no persistent parent
+/// (`parent_count == 0`), so it is a durable root; its child `orphan_leaf(n)` gets `parent_count
+/// 1`.
+#[turbo_tasks::function(operation, root)]
+async fn root_with_child(n: u32) -> Result<Vc<u32>> {
+    Ok(Vc::cell(*orphan_leaf(n).await? + 1))
+}
+
 #[turbo_tasks::function]
 async fn branch_a() -> Result<Vc<u32>> {
     Ok(Vc::cell(1 + *leaf(10).await?))
