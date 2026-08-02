@@ -1214,13 +1214,6 @@ impl<'e> ExecuteContext<'e> for ExecuteContextImpl<'e> {
             .unwrap_or_default()
     }
 
-    fn gc_target_resident(&self, task_id: TaskId) -> Option<bool> {
-        // Only the GC context (the one collecting zeroed ids) reports residency.
-        self.gc_zeroed
-            .is_some()
-            .then(|| self.backend.storage.with_task(task_id, |_| ()).is_some())
-    }
-
     fn note_gc_edge_loss_candidate(&mut self, task_id: TaskId) {
         if let Some(candidates) = self.gc_edge_loss.as_mut() {
             candidates.push(task_id);
