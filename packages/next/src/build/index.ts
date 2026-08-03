@@ -2999,7 +2999,15 @@ export default async function build(
         pageType: 'app' | 'pages',
         outputPath: string
       ) {
-        outputPath = path.posix.join(pageType, outputPath)
+        if (pageType === 'app') {
+          outputPath = path.posix.join(
+            'app',
+            normalizeAppPath(outputPath).replace(/%5F/g, '_'),
+            outputPath.endsWith('/page') ? '/page' : '/route'
+          )
+        } else {
+          outputPath = path.posix.join('pages', outputPath)
+        }
         let entry = prerenderRoutes.get(outputPath)
         if (!entry) {
           entry = { routes: {}, dynamicRoutes: {} }
