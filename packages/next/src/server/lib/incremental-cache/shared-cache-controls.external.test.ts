@@ -32,6 +32,7 @@ describe('SharedCacheControls', () => {
           fallbackRevalidate: 30,
           fallbackExpire: 50,
           fallback: true,
+          fallbackRootParams: undefined,
           fallbackSourceRoute: undefined,
           fallbackRouteParams: undefined,
           renderingMode: RenderingMode.PARTIALLY_STATIC,
