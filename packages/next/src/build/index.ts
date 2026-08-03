@@ -3560,8 +3560,7 @@ export default async function build(
                   route.pathname === UNDERSCORE_NOT_FOUND_ROUTE
                     ? 404
                     : meta.status
-                const isNotFoundTrue =
-                  prerenderManifest.notFoundRoutes.includes(route.pathname)
+                const isNotFoundTrue = notFoundRoutes.includes(route.pathname)
                 let classification: PrerenderManifestClassification = {}
                 if (!isNotFoundTrue) {
                   if (isAppRouteHandler) {
@@ -4349,6 +4348,7 @@ export default async function build(
         })
       }
 
+      // The "legacy" prerender manifest for builder/adapter
       const prerenderManifest: PrerenderManifest = {
         version: 4,
         routes: Object.fromEntries(
@@ -4397,6 +4397,7 @@ export default async function build(
           locales: config.i18n?.locales,
         })
 
+        // Write the per-route prerender manifests which are used by the Next.js runtime.
         for (const [page, manifest] of prerenderRoutes) {
           await mkdir(path.join(distDir, 'server', page), { recursive: true })
           await writePrerenderManifest(
