@@ -320,7 +320,7 @@ export abstract class RouteModule<
           projectDir,
           distDir: this.distDir,
           manifest: !this.isDev
-            ? `server/${router === 'app' ? 'app' : 'pages'}${normalizedPagePath}/${PRERENDER_MANIFEST}`
+            ? `server/${router === 'app' ? 'app' : 'pages'}${srcPage.replace(/%5F/g, '_')}/${PRERENDER_MANIFEST}`
             : PRERENDER_MANIFEST,
           shouldCache: !this.isDev,
           handleMissing: true,
