@@ -50,7 +50,7 @@ use tracing_subscriber::{Registry, layer::SubscriberExt, util::SubscriberInitExt
 use turbo_rcstr::{RcStr, rcstr};
 use turbo_tasks::{
     Effects, FxIndexSet, OperationValue, OperationVc, PrettyPrintError, ReadRef, ResolvedVc,
-    TransientInstance, TryJoinIterExt, TurboTasksApi, TurboTasksCallApi, UpdateInfo, Vc,
+    TraitRef, TransientInstance, TryJoinIterExt, TurboTasksApi, TurboTasksCallApi, UpdateInfo, Vc,
     mark_top_level_task,
     message_queue::{CompilationEvent, Severity},
     read_strongly_consistent_and_apply_effects, take_effects,
@@ -68,7 +68,7 @@ use turbopack_core::{
     issue::PlainIssue,
     output::{OutputAsset, OutputAssets},
     source_map::{SourceMap, Token},
-    version::{PartialUpdate, TotalUpdate, Update, VersionState},
+    version::{NotFoundVersion, PartialUpdate, TotalUpdate, Update, Version, VersionState},
 };
 use turbopack_ecmascript_hmr_protocol::{ClientUpdateInstruction, Issue, ResourceIdentifier};
 use turbopack_trace_utils::{
@@ -1849,24 +1849,22 @@ async fn hmr_update_with_issues_operation(
     .cell())
 }
 
-/// Aggregate counterpart to [`project_hmr_update_operation`].
 #[turbo_tasks::function(operation, root)]
 fn project_server_hmr_update_operation(
     project: ResolvedVc<Project>,
-    state: ResolvedVc<VersionState>,
+    from: ResolvedVc<Box<dyn Version>>,
 ) -> Vc<Update> {
-    project.server_hmr_update(*state)
+    project.server_hmr_update(*from)
 }
 
-/// Aggregate counterpart to [`hmr_update_with_issues_operation`].
-#[tracing::instrument(level = "info", name = "server hmr subscription", skip_all)]
+#[tracing::instrument(level = "info", name = "server hmr update", skip_all)]
 #[turbo_tasks::function(operation, root)]
 async fn server_hmr_update_with_issues_operation(
     project: ResolvedVc<Project>,
-    state: ResolvedVc<VersionState>,
+    from: ResolvedVc<Box<dyn Version>>,
 ) -> Result<Vc<HmrUpdateWithIssues>> {
-    tracing::info!("server hmr subscription");
-    let update_op = project_server_hmr_update_operation(project, state);
+    tracing::info!("server hmr update");
+    let update_op = project_server_hmr_update_operation(project, from);
     // See `hmr_update_with_issues_operation`: the JS consumer relies on this
     // read *throwing* on build-graph failures; don't swallow errors.
     let update = update_op
@@ -1884,89 +1882,95 @@ async fn server_hmr_update_with_issues_operation(
     .cell())
 }
 
-#[tracing::instrument(
-    level = "info",
-    name = "get server HMR events",
-    skip(env, project, func)
-)]
-#[napi(ts_return_type = "{ __napiType: \"RootTask\" }")]
-pub fn project_server_hmr_events(
-    env: Env,
+/// The version a server HMR pull produced, handed to JS so it can pass it back
+/// as the `from` of the next pull.
+///
+/// A [`TraitRef`] rather than a `Vc`: it must name one specific past snapshot,
+/// which is what [`Version::update`] diffs against. A `Vc` would either name a
+/// live computation that drifts forward to the current version on re-read, or a
+/// cell belonging to a task that has since gone away.
+pub struct ServerHmrVersion(TraitRef<Box<dyn Version>>);
+
+#[napi(object, object_from_js = false)]
+pub struct NapiServerHmrUpdate {
+    pub update: serde_json::Value,
+    /// Absent when the update carries no new version (nothing changed), in
+    /// which case the caller keeps the one it already has.
+    pub version: Option<External<ServerHmrVersion>>,
+}
+
+#[tracing::instrument(level = "info", name = "get server HMR update", skip_all)]
+#[napi]
+pub async fn project_get_server_hmr_update(
     #[napi(ts_arg_type = "{ __napiType: \"Project\" }")] project: &External<ProjectInstance>,
-    #[napi(ts_arg_type = "(err: Error, value: TurbopackResult<NodeJsHmrUpdate>) => void")]
-    func: FunctionRef<TurbopackResult<Unknown<'static>>, ()>,
-) -> napi::Result<External<RootTask>> {
+    from: Option<&External<ServerHmrVersion>>,
+) -> napi::Result<TurbopackResult<NapiServerHmrUpdate>> {
     let container = project.container;
-    // Sentinel resource id for the aggregated stream (no real chunk path).
-    let identifier_path: RcStr = rcstr!("__next_all_hmr__");
-    subscribe(
-        project.turbopack_ctx.clone(),
-        &env,
-        &func,
-        move || async move {
+    let turbo_tasks = project.turbopack_ctx.turbo_tasks();
+    let from = from.map(|from| from.0.clone());
+
+    let update = turbo_tasks
+        .run_once(async move {
             // HACK(bgw): Remove this unmark call
             unmark_top_level_task_may_leak_eventually_consistent_state();
-
             let project = container.project().to_resolved().await?;
-            let state = project.server_hmr_version_state().to_resolved().await?;
-
-            let update_op = server_hmr_update_with_issues_operation(project, state);
-
+            // No `from` on the first pull of a session. Nothing diffs against
+            // `NotFoundVersion`, so that pull reports no changes and exists only
+            // to hand back the current version.
+            let from = match from {
+                Some(from) => TraitRef::cell(from).to_resolved().await?,
+                None => ResolvedVc::upcast(NotFoundVersion::new().to_resolved().await?),
+            };
             // HACK(bgw): Remove this mark call
             mark_top_level_task();
-
+            let update_op = server_hmr_update_with_issues_operation(project, from);
             let read =
                 read_strongly_consistent_and_apply_effects(update_op, |v| &v.effects).await?;
-
             // HACK(bgw): Remove this unmark call
             unmark_top_level_task_may_leak_eventually_consistent_state();
-
             let HmrUpdateWithIssues { update, issues, .. } = &*read;
-            match &**update {
-                Update::Missing | Update::None => {}
-                Update::Total(TotalUpdate { to }) => {
-                    state.set(to.clone()).await?;
-                }
-                Update::Partial(PartialUpdate { to, .. }) => {
-                    state.set(to.clone()).await?;
-                }
-            }
-            Ok((Some(update.clone()), issues.clone()))
+            Ok((update.clone(), issues.clone()))
+        })
+        .await
+        .map_err(|e| napi::Error::from_reason(PrettyPrintError(&e).to_string()))?;
+
+    let (update, issues) = update;
+
+    let update_issues = issues
+        .iter()
+        .map(|issue| Issue::from(&**issue))
+        .collect::<Vec<_>>();
+    let identifier = ResourceIdentifier {
+        path: rcstr!("__next_all_hmr__"),
+        headers: None,
+    };
+    let instruction = match &*update {
+        Update::Missing | Update::Total(_) => {
+            ClientUpdateInstruction::restart(&identifier, &update_issues)
+        }
+        Update::Partial(update) => {
+            ClientUpdateInstruction::partial(&identifier, &update.instruction, &update_issues)
+        }
+        Update::None => ClientUpdateInstruction::issues(&identifier, &update_issues),
+    };
+    let version = match &*update {
+        Update::Missing | Update::None => None,
+        Update::Total(TotalUpdate { to }) | Update::Partial(PartialUpdate { to, .. }) => {
+            Some(External::new(ServerHmrVersion(to.clone())))
+        }
+    };
+
+    Ok(TurbopackResult {
+        result: NapiServerHmrUpdate {
+            update: serde_json::to_value(&instruction)
+                .map_err(|error| napi::Error::from_reason(error.to_string()))?,
+            version,
         },
-        move |ctx| {
-            let (update, issues) = ctx.value;
-
-            let napi_issues = issues
-                .iter()
-                .map(|issue| NapiIssue::from(&**issue))
-                .collect();
-            let update_issues = issues
-                .iter()
-                .map(|issue| Issue::from(&**issue))
-                .collect::<Vec<_>>();
-
-            let identifier = ResourceIdentifier {
-                path: identifier_path.clone(),
-                headers: None,
-            };
-            let update = match update.as_deref() {
-                None | Some(Update::Missing) | Some(Update::Total(_)) => {
-                    ClientUpdateInstruction::restart(&identifier, &update_issues)
-                }
-                Some(Update::Partial(update)) => ClientUpdateInstruction::partial(
-                    &identifier,
-                    &update.instruction,
-                    &update_issues,
-                ),
-                Some(Update::None) => ClientUpdateInstruction::issues(&identifier, &update_issues),
-            };
-
-            Ok(TurbopackResult {
-                result: ctx.env.to_js_value(&update)?,
-                issues: napi_issues,
-            })
-        },
-    )
+        issues: issues
+            .iter()
+            .map(|issue| NapiIssue::from(&**issue))
+            .collect(),
+    })
 }
 
 #[tracing::instrument(level = "info", name = "get client HMR events", skip(env, project, func), fields(chunk_name = %chunk_name))]

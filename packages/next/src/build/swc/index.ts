@@ -28,12 +28,13 @@ import type {
   Endpoint,
   HmrChunkNames,
   Lockfile,
-  NodeJsHmrUpdate,
   PartialProjectOptions,
   Project,
   ProjectOptions,
   RawEntrypoints,
   Route,
+  ServerHmrUpdate,
+  ServerHmrVersion,
   TurboEngineOptions,
   TurbopackResult,
   TurbopackStackFrame,
@@ -757,10 +758,13 @@ function bindingToApi(
       })()
     }
 
-    serverHmrEvents(): AsyncIterableIterator<TurbopackResult<NodeJsHmrUpdate>> {
-      return subscribe(true, async (callback) =>
-        binding.projectServerHmrEvents(this._nativeProject, callback)
-      )
+    async getServerHmrUpdate(
+      from: ServerHmrVersion | undefined
+    ): Promise<TurbopackResult<ServerHmrUpdate>> {
+      return binding.projectGetServerHmrUpdate(
+        this._nativeProject,
+        from
+      ) as Promise<TurbopackResult<ServerHmrUpdate>>
     }
 
     clientHmrEvents(

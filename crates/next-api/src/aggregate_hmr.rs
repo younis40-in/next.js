@@ -4,20 +4,17 @@ use turbo_tasks::{
     FxIndexMap, FxIndexSet, NonLocalValue, ReadRef, ResolvedVc, TraitRef, TryJoinIterExt, Vc,
     debug::ValueDebugFormat, trace::TraceRawVcs,
 };
-use turbo_tasks_fs::FileSystemPath;
 use turbo_tasks_hash::{Xxh3Hash64Hasher, encode_base64};
 use turbopack_browser::ecmascript::list::content::EcmascriptDevChunkListContent;
 use turbopack_core::{
     update_instruction::UpdateInstruction,
-    version::{PartialUpdate, Update, Version, VersionState, VersionedContent},
+    version::{PartialUpdate, Update, Version, VersionedContent},
 };
 use turbopack_ecmascript::chunk_list::{
     merged_update::EcmascriptMergedUpdate,
     update::{ChunkListUpdate, ChunkUpdate, EcmascriptUpdateInstruction},
 };
 use turbopack_nodejs::ecmascript::node::entry::chunk_list_content::EcmascriptBuildNodeChunkListContent;
-
-use crate::versioned_content_map::VersionedContentMap;
 
 #[derive(TraceRawVcs, PartialEq, Eq, ValueDebugFormat, NonLocalValue)]
 pub struct HmrChunkWithContent {
@@ -29,11 +26,11 @@ pub struct HmrChunkWithContent {
 pub struct HmrChunksWithContent(Vec<HmrChunkWithContent>);
 
 /// Whether `content` is a chunk list, i.e. an entry point of the chunk graph that
-/// an HMR subscription can be anchored on.
+/// an aggregate HMR session can be anchored on.
 ///
 /// Note this must enumerate every chunk list content type. A new chunking context
 /// that introduces one has to be added here, otherwise its chunks silently drop
-/// out of the HMR subscription.
+/// out of aggregate HMR updates.
 pub fn is_entry_chunk_list_content(content: ResolvedVc<Box<dyn VersionedContent>>) -> bool {
     ResolvedVc::try_downcast_type::<EcmascriptBuildNodeChunkListContent>(content).is_some()
         || ResolvedVc::try_downcast_type::<EcmascriptDevChunkListContent>(content).is_some()
@@ -75,16 +72,6 @@ impl Version for AggregateHmrVersion {
 }
 
 impl AggregateHmrVersion {
-    pub async fn from_map(
-        map: Vc<VersionedContentMap>,
-        root: FileSystemPath,
-    ) -> Result<Vc<Box<dyn Version>>> {
-        // An empty `versions` map behaves the same as `NotFoundVersion` would in
-        // `diff_chunks_against`, so no special case is needed here.
-        let chunks = map.hmr_chunks_in_path(root).await?;
-        Ok(Vc::upcast(Self::from_chunks(&chunks).await?))
-    }
-
     pub async fn from_chunks(chunks: &[HmrChunkWithContent]) -> Result<Vc<Self>> {
         let versions = chunks
             .iter()
@@ -159,14 +146,14 @@ pub struct DiffResult {
     pub has_new_chunks: bool,
 }
 
-/// Diffs each chunk against the [`AggregateHmrVersion`] held by `from`.
+/// Diffs each chunk against `from`.
 ///
-/// If `from` holds some other kind of `Version`, there's nothing meaningful to
+/// If `from` is not an [`AggregateHmrVersion`], there's nothing meaningful to
 /// diff against, so this returns no updates and leaves it to the caller to
 /// decide what to do.
 pub async fn diff_chunks_against(
     chunks: &[HmrChunkWithContent],
-    from: Vc<VersionState>,
+    from: Vc<Box<dyn Version>>,
 ) -> Result<DiffResult> {
     if chunks.is_empty() {
         return Ok(DiffResult {
@@ -174,7 +161,7 @@ pub async fn diff_chunks_against(
             has_new_chunks: false,
         });
     }
-    let from_resolved = from.get().to_resolved().await?;
+    let from_resolved = from.to_resolved().await?;
     let Some(from_aggregate) = ResolvedVc::try_downcast_type::<AggregateHmrVersion>(from_resolved)
     else {
         return Ok(DiffResult {

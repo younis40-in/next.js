@@ -13,6 +13,7 @@ import type {
   TraceQueryOptions,
   TraceQueryResult,
   MemoryEvictionMode,
+  ServerHmrVersion as NativeServerHmrVersion,
 } from './generated-native'
 
 export type { TraceServerHandle, TraceQueryOptions, TraceQueryResult }
@@ -268,6 +269,19 @@ export type NodeJsHmrUpdate =
   | NodeJsPartialHmrUpdate
   | NodeJsRestartHmrUpdate
 
+/**
+ * Opaque handle to the compiled-output version a server HMR pull produced. The
+ * caller holds it and passes it back as the `from` of the next pull, which is
+ * what makes the next update a diff rather than a full restart.
+ */
+export type ServerHmrVersion = ExternalObject<NativeServerHmrVersion>
+
+export interface ServerHmrUpdate {
+  update: NodeJsHmrUpdate
+  /** Absent when nothing changed; keep the version you already hold. */
+  version?: ServerHmrVersion
+}
+
 export interface HmrChunkNames {
   /** Relative paths to output chunks that can receive HMR updates (e.g., "server/chunks/ssr/..._.js") */
   chunkNames: string[]
@@ -334,7 +348,9 @@ export interface Project {
     TurbopackResult<RawEntrypoints | {}>
   >
 
-  serverHmrEvents(): AsyncIterableIterator<TurbopackResult<NodeJsHmrUpdate>>
+  getServerHmrUpdate(
+    from: ServerHmrVersion | undefined
+  ): Promise<TurbopackResult<ServerHmrUpdate>>
 
   clientHmrEvents(
     identifier: string
