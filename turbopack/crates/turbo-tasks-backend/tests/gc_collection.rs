@@ -9,6 +9,9 @@ use turbo_tasks::{
     GcRoot, ResolvedVc, State, TaskId, TurboTasks, Vc, prevent_gc,
     unmark_top_level_task_may_leak_eventually_consistent_state,
 };
+use turbo_tasks_backend::{
+    BackendOptions, EvictionMode, GitVersionInfo, TtlCounter, TurboTasksBackend,
+};
 
 use crate::util::create_tt;
 
