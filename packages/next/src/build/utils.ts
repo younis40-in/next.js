@@ -70,6 +70,7 @@ import { collectRootParamKeys } from './segment-config/app/collect-root-param-ke
 import { buildAppStaticPaths } from './static-paths/app'
 import { buildPagesStaticPaths } from './static-paths/pages'
 import type { PrerenderedRoute } from './static-paths/types'
+import type { VariantCombinationGroups } from '../server/variants/combinations'
 import type { CacheControl } from '../server/lib/cache-control'
 import { formatExpire, formatRevalidate } from './output/format'
 import type {
@@ -673,6 +674,13 @@ type PageIsStaticResult = {
   hasStaticProps?: boolean
   prerenderedRoutes: PrerenderedRoute[] | undefined
   prerenderFallbackMode: FallbackMode | undefined
+  /**
+   * The variant combinations the page declared, which the runtime needs in
+   * order to tell a combination it prerendered from one it did not. Only app
+   * pages with dynamic segments reach the collection, so this is undefined
+   * elsewhere.
+   */
+  variantCombinationGroups: VariantCombinationGroups | undefined
   rootParamKeys: readonly string[] | undefined
   isNextImageImported?: boolean
   traceIncludes?: string[]
@@ -742,6 +750,7 @@ export async function isPageStatic({
       isRoutePPREnabled: false,
       prerenderFallbackMode: undefined,
       prerenderedRoutes: undefined,
+      variantCombinationGroups: undefined,
       rootParamKeys: undefined,
       hasStaticProps: false,
       hasServerProps: false,
@@ -769,6 +778,7 @@ export async function isPageStatic({
       let componentsResult: LoadComponentsReturnType
       let prerenderedRoutes: PrerenderedRoute[] | undefined
       let prerenderFallbackMode: FallbackMode | undefined
+      let variantCombinationGroups: VariantCombinationGroups | undefined
       let appConfig: AppSegmentConfig = {}
       let rootParamKeys: readonly string[] | undefined
       const pathIsEdgeRuntime = isEdgeRuntime(pageRuntime)
@@ -887,29 +897,32 @@ export async function isPageStatic({
             ;({ prerenderedRoutes, fallbackMode: prerenderFallbackMode } =
               buildStaticMetadataStaticPaths(page))
           } else {
-            ;({ prerenderedRoutes, fallbackMode: prerenderFallbackMode } =
-              await buildAppStaticPaths({
-                dir,
-                page,
-                route,
-                cacheComponents,
-                authInterrupts,
-                useCacheTimeout,
-                staticPageGenerationTimeout,
-                segments,
-                distDir,
-                requestHeaders: {},
-                isrFlushToDisk,
-                cacheMaxMemorySize,
-                cacheHandler,
-                cacheLifeProfiles,
-                ComponentMod,
-                nextConfigOutput,
-                isRoutePPREnabled,
-                buildId,
-                deploymentId,
-                rootParamKeys,
-              }))
+            ;({
+              prerenderedRoutes,
+              fallbackMode: prerenderFallbackMode,
+              variantCombinationGroups,
+            } = await buildAppStaticPaths({
+              dir,
+              page,
+              route,
+              cacheComponents,
+              authInterrupts,
+              useCacheTimeout,
+              staticPageGenerationTimeout,
+              segments,
+              distDir,
+              requestHeaders: {},
+              isrFlushToDisk,
+              cacheMaxMemorySize,
+              cacheHandler,
+              cacheLifeProfiles,
+              ComponentMod,
+              nextConfigOutput,
+              isRoutePPREnabled,
+              buildId,
+              deploymentId,
+              rootParamKeys,
+            }))
           }
         }
       } else {
@@ -982,6 +995,7 @@ export async function isPageStatic({
         isRoutePPREnabled,
         prerenderFallbackMode,
         prerenderedRoutes,
+        variantCombinationGroups,
         rootParamKeys,
         hasStaticProps,
         hasServerProps,
