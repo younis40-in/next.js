@@ -4387,10 +4387,11 @@ export default async function build(
         // Write the per-route prerender manifests which are used by the Next.js runtime.
         for (const [page, manifest] of prerenderRoutes) {
           await mkdir(path.join(distDir, 'server', page), { recursive: true })
-          await writePrerenderManifest(
-            path.join(distDir, 'server', page),
-            manifest
-          )
+          await writePrerenderManifest(path.join(distDir, 'server', page), {
+            ...manifest,
+            // Populate with the global list of not-found routes.
+            notFoundRoutes,
+          })
         }
       } else {
         await writePrerenderManifest(distDir, {
