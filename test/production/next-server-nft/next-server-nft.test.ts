@@ -604,7 +604,6 @@ async function readNormalizedNFT(next, name) {
            "./.next/BUILD_ID",
            "./.next/app-path-routes-manifest.json",
            "./.next/build-manifest.json",
-           "./.next/prerender-manifest.json",
            "./.next/required-server-files.json",
            "./.next/routes-manifest.json",
            "./.next/server/app-paths-manifest.json",

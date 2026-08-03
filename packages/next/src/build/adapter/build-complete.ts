@@ -12,7 +12,11 @@ import { isDynamicRoute } from '../../shared/lib/router/utils'
 import type { Revalidate } from '../../server/lib/cache-control'
 import type { NextConfigComplete } from '../../server/config-shared'
 import { normalizeAppPath } from '../../shared/lib/router/utils/app-paths'
-import { AdapterOutputType, type PHASE_TYPE } from '../../shared/lib/constants'
+import {
+  AdapterOutputType,
+  PRERENDER_MANIFEST,
+  type PHASE_TYPE,
+} from '../../shared/lib/constants'
 import { normalizePagePath } from '../../shared/lib/page-path/normalize-page-path'
 import {
   convertRedirects,
@@ -2564,6 +2568,11 @@ async function getSharedNodeAssets({
   for (const file of requiredServerFiles) {
     // add to shared node assets
     const filePath = path.join(dir, file)
+    if (filePath === path.join(distDir, PRERENDER_MANIFEST)) {
+      // Ignore, this is not needed at runtime and we already pass all of this information via the
+      // adapter API instead.
+      continue
+    }
     const fileOutputPath = path.relative(repoRoot, filePath)
     await pushAsset(
       sharedNodeAssets,
