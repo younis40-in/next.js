@@ -493,9 +493,13 @@ export async function collectBuildTraces({
             // computed path, so the tracer can't discover it. It's written
             // after tracing completes, so add it here.
             //
-            // `/_app` and `/_document` are never rendered directly, so they
-            // don't load one.
-            if (entryName !== 'pages/_app' && entryName !== 'pages/_document') {
+            // Only app and pages routes load one, and `/_app` and `/_document`
+            // are not real routes.
+            if (
+              (isApp || isPages) &&
+              entryName !== 'pages/_app' &&
+              entryName !== 'pages/_document'
+            ) {
               curTracedFiles.add(
                 `${path.basename(entryName)}/${PRERENDER_MANIFEST}`
               )

@@ -271,12 +271,13 @@ impl Asset for NftJsonAsset {
 
             // The prerender manifests are written after Turbopack runs, so it is not part of the
             // module graph and can't be discovered by tracing. It is also written after the build
-            // has finished tracing, so there is no content to hash yet. `/_app` and `/_document`
-            // are never rendered directly, so they don't load one.
+            // has finished tracing, so there is no content to hash yet. Entries without a page
+            // name (middleware, instrumentation) aren't routes, and `/_app` and `/_document` are
+            // not real routes, so none of them load one.
             let prerender_manifest;
             if !matches!(
                 this.page_name.as_deref(),
-                Some("pages/_app" | "pages/_document")
+                None | Some("pages/_app" | "pages/_document")
             ) {
                 prerender_manifest = format!(
                     "./{}/prerender-manifest.json",
