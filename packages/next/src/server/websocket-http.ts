@@ -282,13 +282,14 @@ export function createOwnedListeners(): {
 export function ownWebSocketUpgradeSocketErrors(
   req: IncomingMessage,
   socket: Duplex
-): void {
+): () => unknown[] {
   const ownedSocket = socket as Duplex & {
-    [RAW_UPGRADE_ERROR_OWNER]?: object
+    [RAW_UPGRADE_ERROR_OWNER]?: { release?: () => unknown[] }
   }
-  if (ownedSocket[RAW_UPGRADE_ERROR_OWNER]) return
+  const existingOwner = ownedSocket[RAW_UPGRADE_ERROR_OWNER]
+  if (existingOwner) return existingOwner.release ?? (() => [])
 
-  const owner = {}
+  const owner: { release?: () => unknown[] } = {}
   let installing = true
   let closeRequested = false
   let cleaned = false
@@ -326,6 +327,7 @@ export function ownWebSocketUpgradeSocketErrors(
     }
   }
 
+  owner.release = cleanup
   Object.defineProperty(ownedSocket, RAW_UPGRADE_ERROR_OWNER, {
     configurable: true,
     value: owner,
@@ -344,6 +346,7 @@ export function ownWebSocketUpgradeSocketErrors(
     )
   }
   if (closeRequested || isSocketWriteClosed(socket)) onClose()
+  return cleanup
 }
 
 async function writeSocket(socket: Duplex, chunk: Uint8Array | string) {
