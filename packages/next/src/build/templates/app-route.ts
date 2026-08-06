@@ -161,10 +161,9 @@ export async function handler(
 
   const normalizedSrcPage = normalizeAppPath(srcPage)
 
-  // TODO revert once handleMissing has sound typedef
   let isIsr = Boolean(
-    prerenderManifest?.dynamicRoutes?.[normalizedSrcPage] ||
-      prerenderManifest?.routes?.[resolvedPathname]
+    prerenderManifest.dynamicRoutes[normalizedSrcPage] ||
+      prerenderManifest.routes[resolvedPathname]
   )
 
   const render404 = async () => {
