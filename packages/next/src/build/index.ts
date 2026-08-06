@@ -4395,11 +4395,36 @@ export default async function build(
           buildId,
           locales: config.i18n?.locales,
         })
+      } else {
+        await writePrerenderManifest(distDir, {
+          version: 4,
+          routes: {},
+          dynamicRoutes: {},
+          notFoundRoutes: [],
+          preview: previewProps,
+        })
+      }
 
-        // Write the per-route prerender manifests which are used by the Next.js runtime.
-        for (let [page, manifest] of prerenderRoutes) {
-          await mkdir(path.join(distDir, 'server', page), { recursive: true })
-          await writePrerenderManifest(path.join(distDir, 'server', page), {
+      // Every route loads its own prerender manifest at runtime, so make sure one
+      // exists for each of them. Routes that didn't record any prerender data get
+      // an empty manifest rather than no file at all.
+      for (const page of Object.keys(pagesManifest)) {
+        // `/_app` and `/_document` are not route modules and never load one.
+        if (page === '/_app' || page === '/_document') continue
+        getPrerenderRoutesEntry('pages', page)
+      }
+      for (const originalAppPath of Object.keys(appPathRoutes)) {
+        getPrerenderRoutesEntry('app', originalAppPath)
+      }
+
+      // Write the per-route prerender manifests which are used by the Next.js runtime.
+      for (const [page, manifest] of prerenderRoutes) {
+        await mkdir(path.join(distDir, SERVER_DIRECTORY, page), {
+          recursive: true,
+        })
+        await writePrerenderManifest(
+          path.join(distDir, SERVER_DIRECTORY, page),
+          {
             version: 4,
             routes: Object.entries(manifest.routes).reduce(
               (acc, [key, value]) => {
@@ -4432,16 +4457,8 @@ export default async function build(
             ),
             // Populate with the global list of not-found routes.
             notFoundRoutes,
-          })
-        }
-      } else {
-        await writePrerenderManifest(distDir, {
-          version: 4,
-          routes: {},
-          dynamicRoutes: {},
-          notFoundRoutes: [],
-          preview: previewProps,
-        })
+          }
+        )
       }
 
       await writeManifest(

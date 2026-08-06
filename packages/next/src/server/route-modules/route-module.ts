@@ -329,15 +329,7 @@ export abstract class RouteModule<
                 }/${PRERENDER_MANIFEST}`
               : `server/pages${srcPage}/${PRERENDER_MANIFEST}`,
           shouldCache: !this.isDev,
-          handleMissing: true,
-        }) ??
-          // The prerender manifest doesn't exist if no data was recorded during prerendering.
-          ({
-            version: 4,
-            routes: {},
-            dynamicRoutes: {},
-            notFoundRoutes: [],
-          } satisfies PrerenderManifestRuntime),
+        }),
         loadManifestFromRelativePath<PreviewPropsManifest>({
           projectDir,
           distDir: this.distDir,
