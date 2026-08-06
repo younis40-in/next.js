@@ -524,6 +524,7 @@ export type DynamicPrerenderManifestRouteRuntime = Pick<
   | 'remainingPrerenderableParams'
 >
 
+// A version of PrerenderManifest that is only used internally at runtime, not for a builder.
 export type PrerenderManifestRuntime = {
   version: 4
   routes: {
@@ -688,7 +689,10 @@ async function readManifest<T extends object>(filePath: string): Promise<T> {
 }
 
 async function writePrerenderManifest<
-  T extends Pick<PrerenderManifest, 'routes' | 'dynamicRoutes'>,
+  T extends Pick<
+    PrerenderManifest | PrerenderManifestRuntime,
+    'routes' | 'dynamicRoutes'
+  >,
 >(distDir: string, manifest: T): Promise<void> {
   // Sort for deterministic outputs
   manifest.routes = sortPagesObject(manifest.routes)
@@ -4393,10 +4397,39 @@ export default async function build(
         })
 
         // Write the per-route prerender manifests which are used by the Next.js runtime.
-        for (const [page, manifest] of prerenderRoutes) {
+        for (let [page, manifest] of prerenderRoutes) {
           await mkdir(path.join(distDir, 'server', page), { recursive: true })
           await writePrerenderManifest(path.join(distDir, 'server', page), {
-            ...manifest,
+            version: 4,
+            routes: Object.entries(manifest.routes).reduce(
+              (acc, [key, value]) => {
+                acc[key] = {
+                  renderingMode: value.renderingMode,
+                  initialRevalidateSeconds: value.initialRevalidateSeconds,
+                  initialExpireSeconds: value.initialExpireSeconds,
+                  prefetchDataRoute: value.prefetchDataRoute,
+                }
+                return acc
+              },
+              {} as Record<string, PrerenderManifestRouteRuntime>
+            ),
+            dynamicRoutes: Object.entries(manifest.dynamicRoutes).reduce(
+              (acc, [key, value]) => {
+                acc[key] = {
+                  renderingMode: value.renderingMode,
+                  fallback: value.fallback,
+                  fallbackRevalidate: value.fallbackRevalidate,
+                  fallbackExpire: value.fallbackExpire,
+                  fallbackSourceRoute: value.fallbackSourceRoute,
+                  fallbackRouteParams: value.fallbackRouteParams,
+                  fallbackRootParams: value.fallbackRootParams,
+                  remainingPrerenderableParams:
+                    value.remainingPrerenderableParams,
+                }
+                return acc
+              },
+              {} as Record<string, DynamicPrerenderManifestRouteRuntime>
+            ),
             // Populate with the global list of not-found routes.
             notFoundRoutes,
           })
