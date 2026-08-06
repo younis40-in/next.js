@@ -324,9 +324,7 @@ export abstract class RouteModule<
           manifest: this.isDev
             ? PRERENDER_MANIFEST
             : router === 'app'
-              ? `server/app${normalizeAppPath(srcPage).replace(/%5F/g, '_')}${
-                  srcPage.endsWith('/route') ? '/route' : '/page'
-                }/${PRERENDER_MANIFEST}`
+              ? `server/app${srcPage.replace(/%5F/g, '_')}/${PRERENDER_MANIFEST}`
               : `server/pages${normalizedPagePath}/${PRERENDER_MANIFEST}`,
           shouldCache: !this.isDev,
         }),

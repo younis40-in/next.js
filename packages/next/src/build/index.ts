@@ -2999,16 +2999,14 @@ export default async function build(
           dynamicRoutes: { [route: string]: DynamicPrerenderManifestRoute }
         }
       >()
+      // Keyed by the route's output path, so that the manifest sits next to the
+      // route's other output and is reachable from its `.nft.json`.
       function getPrerenderRoutesEntry(
         pageType: 'app' | 'pages',
         outputPath: string
       ) {
         if (pageType === 'app') {
-          outputPath = path.posix.join(
-            'app',
-            normalizeAppPath(outputPath).replace(/%5F/g, '_'),
-            outputPath.endsWith('/page') ? '/page' : '/route'
-          )
+          outputPath = path.posix.join('app', outputPath.replace(/%5F/g, '_'))
         } else {
           outputPath = path.posix.join('pages', normalizePagePath(outputPath))
         }
