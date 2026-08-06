@@ -443,11 +443,12 @@ async function readNormalizedNFT(next, name) {
         )
 
         expect(nonNodeModulesFiles).toMatchInlineSnapshot(`
-                [
-                  "./page/react-loadable-manifest.json",
-                  "./page_client-reference-manifest.js",
-                ]
-              `)
+         [
+           "./page/prerender-manifest.json",
+           "./page/react-loadable-manifest.json",
+           "./page_client-reference-manifest.js",
+         ]
+        `)
       })
 
       it('should not trace too many files in next-minimal-server.js.nft.json', async () => {
@@ -564,6 +565,7 @@ async function readNormalizedNFT(next, name) {
 
         expect(nonNodeModulesFiles).toMatchInlineSnapshot(`
          [
+           "./page/prerender-manifest.json",
            "./page/react-loadable-manifest.json",
            "./page_client-reference-manifest.js",
          ]
@@ -607,12 +609,16 @@ async function readNormalizedNFT(next, name) {
            "./.next/required-server-files.json",
            "./.next/routes-manifest.json",
            "./.next/server/app-paths-manifest.json",
+           "./.next/server/app/_global-error/page/prerender-manifest.json",
            "./.next/server/app/_global-error/page/react-loadable-manifest.json",
            "./.next/server/app/_global-error/page_client-reference-manifest.js",
+           "./.next/server/app/_not-found/page/prerender-manifest.json",
            "./.next/server/app/_not-found/page/react-loadable-manifest.json",
            "./.next/server/app/_not-found/page_client-reference-manifest.js",
+           "./.next/server/app/dynamic-read/page/prerender-manifest.json",
            "./.next/server/app/dynamic-read/page/react-loadable-manifest.json",
            "./.next/server/app/dynamic-read/page_client-reference-manifest.js",
+           "./.next/server/app/page/prerender-manifest.json",
            "./.next/server/app/page/react-loadable-manifest.json",
            "./.next/server/app/page_client-reference-manifest.js",
            "./.next/server/functions-config-manifest.json",
