@@ -269,21 +269,26 @@ impl Asset for NftJsonAsset {
                 })
                 .unzip();
 
-            // Every route loads its own prerender manifest at runtime via a computed path, so it
-            // is not part of the module graph and can't be discovered by tracing. It is also
-            // written after the build has finished tracing, so there is no content to hash yet.
-            // The manifest sits in a directory named after the chunk, e.g. `page.js` ->
-            // `page/prerender-manifest.json`.
-            let prerender_manifest = format!(
-                "./{}/prerender-manifest.json",
-                chunk
-                    .path()
-                    .await?
-                    .file_stem()
-                    .context("expected chunk path to have a file stem")?
-            );
-            files.push(&prerender_manifest);
-            file_hashes.push(None);
+            // The prerender manifests are written after Turbopack runs, so it is not part of the
+            // module graph and can't be discovered by tracing. It is also written after the build
+            // has finished tracing, so there is no content to hash yet. `/_app` and `/_document`
+            // are never rendered directly, so they don't load one.
+            let prerender_manifest;
+            if !matches!(
+                this.page_name.as_deref(),
+                Some("pages/_app" | "pages/_document")
+            ) {
+                prerender_manifest = format!(
+                    "./{}/prerender-manifest.json",
+                    chunk
+                        .path()
+                        .await?
+                        .file_stem()
+                        .context("expected chunk path to have a file stem")?
+                );
+                files.push(&prerender_manifest);
+                file_hashes.push(None);
+            }
 
             // We can't just add this into "files" because Next.js sometimes decides to delete
             // output files such as `.next/server/pages/index.js` if that page was prerendered and

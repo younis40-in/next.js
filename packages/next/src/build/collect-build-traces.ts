@@ -491,10 +491,15 @@ export async function collectBuildTraces({
 
             // Every route loads its own prerender manifest at runtime via a
             // computed path, so the tracer can't discover it. It's written
-            // after tracing completes, so add it unconditionally here.
-            curTracedFiles.add(
-              `${path.basename(entryName)}/${PRERENDER_MANIFEST}`
-            )
+            // after tracing completes, so add it here.
+            //
+            // `/_app` and `/_document` are never rendered directly, so they
+            // don't load one.
+            if (entryName !== 'pages/_app' && entryName !== 'pages/_document') {
+              curTracedFiles.add(
+                `${path.basename(entryName)}/${PRERENDER_MANIFEST}`
+              )
+            }
 
             await fs.writeFile(
               traceOutputPath,

@@ -327,7 +327,7 @@ export abstract class RouteModule<
               ? `server/app${normalizeAppPath(srcPage).replace(/%5F/g, '_')}${
                   srcPage.endsWith('/route') ? '/route' : '/page'
                 }/${PRERENDER_MANIFEST}`
-              : `server/pages${srcPage}/${PRERENDER_MANIFEST}`,
+              : `server/pages${normalizedPagePath}/${PRERENDER_MANIFEST}`,
           shouldCache: !this.isDev,
         }),
         loadManifestFromRelativePath<PreviewPropsManifest>({
