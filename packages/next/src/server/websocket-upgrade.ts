@@ -121,6 +121,7 @@ export interface WebSocketUpgradeTransportContext {
   onHookError?: (error: unknown) => void | Promise<void>
   trackTask?: (promise: Promise<void>) => void
   registryScope?: object
+  routeLease?: import('./websocket-connection-registry').WebSocketRouteLease
 }
 
 export interface WebSocketUpgradeTransportOptions {
