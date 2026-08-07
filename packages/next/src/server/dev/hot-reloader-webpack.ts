@@ -52,6 +52,8 @@ import {
   EntryTypes,
   getInvalidator,
   onDemandEntryHandler,
+  removeMissingOnDemandEntry,
+  removeStaleOnDemandEntry,
 } from './on-demand-entry-handler'
 import { denormalizePagePath } from '../../shared/lib/page-path/denormalize-page-path'
 import { normalizePathSep } from '../../shared/lib/page-path/normalize-path-sep'
@@ -83,6 +85,7 @@ import {
 import type { HmrMessageSentToBrowser } from './hot-reloader-types'
 import type { WebpackError } from 'webpack'
 import { PAGE_TYPES } from '../../lib/page-types'
+import { isEdgeRuntime } from '../../lib/is-edge-runtime'
 import { FAST_REFRESH_RUNTIME_RELOAD } from './messages'
 import { getNextErrorFeedbackMiddleware } from '../../next-devtools/server/get-next-error-feedback-middleware'
 import { getDevOverlayFontMiddleware } from '../../next-devtools/server/font/get-dev-overlay-font-middleware'
@@ -946,7 +949,7 @@ export default class HotReloaderWebpack implements NextJsHotReloaderInterface {
               const pageExists =
                 !dispose && existsSync(entryData.absolutePagePath)
               if (!pageExists) {
-                delete entries[entryKey]
+                removeMissingOnDemandEntry(outputPath, entryKey, entryData)
                 return
               }
             }
@@ -982,6 +985,10 @@ export default class HotReloaderWebpack implements NextJsHotReloaderInterface {
                 })
               : undefined
 
+            // Static-info loading yields. A concurrent ensure can replace or
+            // remove this entry while it is pending.
+            if (entries[entryKey] !== entryData) return
+
             const isServerComponent =
               isAppPath && staticInfo?.rsc !== RSC_MODULE_TYPES.client
 
@@ -1005,6 +1012,18 @@ export default class HotReloaderWebpack implements NextJsHotReloaderInterface {
 
             let pageRuntime = staticInfo?.runtime
 
+            if (
+              isEntry &&
+              !isInstrumentation &&
+              (pageType === PAGE_TYPES.APP || pageType === PAGE_TYPES.PAGES) &&
+              ((key === COMPILER_NAMES.server && isEdgeRuntime(pageRuntime)) ||
+                (key === COMPILER_NAMES.edgeServer &&
+                  !isEdgeRuntime(pageRuntime)))
+            ) {
+              removeStaleOnDemandEntry(outputPath, entryKey, entryData)
+              return
+            }
+
             runDependingOnPageType({
               page,
               pageRuntime,
@@ -1012,7 +1031,7 @@ export default class HotReloaderWebpack implements NextJsHotReloaderInterface {
               onEdgeServer: () => {
                 // TODO-APP: verify if child entry should support.
                 if (!isEdgeServerCompilation || !isEntry) return
-                entries[entryKey].status = BUILDING
+                entryData.status = BUILDING
 
                 if (isInstrumentation) {
                   const normalizedBundlePath = bundlePath.replace('src/', '')
@@ -1084,7 +1103,7 @@ export default class HotReloaderWebpack implements NextJsHotReloaderInterface {
               onClient: () => {
                 if (!isClientCompilation) return
                 if (isChildEntry) {
-                  entries[entryKey].status = BUILDING
+                  entryData.status = BUILDING
                   entrypoints[bundlePath] = finalizeEntrypoint({
                     name: bundlePath,
                     compilerType: COMPILER_NAMES.client,
@@ -1092,7 +1111,7 @@ export default class HotReloaderWebpack implements NextJsHotReloaderInterface {
                     hasAppDir,
                   })
                 } else {
-                  entries[entryKey].status = BUILDING
+                  entryData.status = BUILDING
                   entrypoints[bundlePath] = finalizeEntrypoint({
                     name: bundlePath,
                     compilerType: COMPILER_NAMES.client,
@@ -1107,7 +1126,7 @@ export default class HotReloaderWebpack implements NextJsHotReloaderInterface {
               onServer: () => {
                 // TODO-APP: verify if child entry should support.
                 if (!isNodeServerCompilation || !isEntry) return
-                entries[entryKey].status = BUILDING
+                entryData.status = BUILDING
                 let relativeRequest = relative(
                   config.context!,
                   entryData.absolutePagePath
@@ -1731,7 +1750,7 @@ export default class HotReloaderWebpack implements NextJsHotReloaderInterface {
     }
   ) {
     // Cache the `reloadAfterInvalidation` flag, and use it to reload the page when compilation is done
-    this.reloadAfterInvalidation = reloadAfterInvalidation
+    this.reloadAfterInvalidation ||= reloadAfterInvalidation
     const outputPath = this.multiCompiler?.outputPath
     if (outputPath) {
       getInvalidator(outputPath)?.invalidate()

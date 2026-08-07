@@ -71,8 +71,9 @@ const routeModule = new AppRouteRouteModule({
   userland: () => require('VAR_USERLAND') as typeof import('VAR_USERLAND'),
   // In Turbopack dev mode, also provide a synchronous per-request getter so
   // server HMR updates are picked up without re-executing the entry chunk.
-  // Using require() (synchronous) avoids adding async overhead that would be
-  // incorrectly attributed to application-code time in devRequestTiming.
+  // require() stays synchronous for ordinary modules. An async module with
+  // top-level await returns its live Promise so the request owns one exact
+  // generation while it resolves.
   ...(process.env.TURBOPACK && process.env.__NEXT_DEV_SERVER
     ? {
         getUserland: () =>
