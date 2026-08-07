@@ -498,7 +498,13 @@ export interface ExperimentalConfig {
    * regardless of this flag.
    */
   coldCacheBadge?: boolean
-  webSocketRouteHandlers?: boolean
+  /** @experimental WebSocket Route Handlers are an experimental feature. */
+  webSocketRouteHandlers?:
+    | boolean
+    | {
+        /** Exact HTTP(S) origins allowed to open cross-origin WebSockets. */
+        allowedOrigins?: string[]
+      }
   useSkewCookie?: boolean
   /** @deprecated use top-level `cacheHandlers` instead */
   cacheHandlers?: NextConfig['cacheHandlers']
