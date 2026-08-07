@@ -120,6 +120,7 @@ export type SetupOpts = {
   restartServer?: () => Promise<void>
   resetFetch: () => void
   serverFastRefresh?: boolean
+  webSocketRegistryScope?: object
 }
 
 export interface DevRoutesManifest {
@@ -274,6 +275,7 @@ async function startWatcher(
           lockfile,
           onDevServerCleanup: opts.onDevServerCleanup,
           restartServer: opts.restartServer,
+          webSocketRegistryScope: opts.webSocketRegistryScope,
         })
       })()
 

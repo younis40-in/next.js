@@ -399,7 +399,8 @@ class Invalidator {
 
 function disposeInactiveEntries(
   entries: NonNullable<ReturnType<(typeof entriesMap)['get']>>,
-  maxInactiveAge: number
+  maxInactiveAge: number,
+  isEntryPinned?: (bundlePath: string) => boolean
 ) {
   Object.keys(entries).forEach((entryKey) => {
     const entryData = entries[entryKey]
@@ -416,6 +417,11 @@ function disposeInactiveEntries(
       isMiddlewareFilename(bundlePath) ||
       isInstrumentationHookFilename(bundlePath)
     ) {
+      return
+    }
+
+    if (isEntryPinned?.(bundlePath)) {
+      entryData.dispose = false
       return
     }
 
@@ -619,6 +625,7 @@ export function onDemandEntryHandler({
   pagesDir,
   rootDir,
   appDir,
+  isEntryPinned,
 }: {
   hotReloader: NextJsHotReloaderInterface
   maxInactiveAge: number
@@ -628,6 +635,7 @@ export function onDemandEntryHandler({
   pagesDir?: string
   rootDir: string
   appDir?: string
+  isEntryPinned?: (bundlePath: string) => boolean
 }) {
   const hasAppDir = !!appDir
   let curInvalidator: Invalidator = getInvalidator(
@@ -807,7 +815,7 @@ export function onDemandEntryHandler({
   const pingIntervalTime = Math.max(1000, Math.min(5000, maxInactiveAge))
 
   setInterval(function () {
-    disposeInactiveEntries(curEntries, maxInactiveAge)
+    disposeInactiveEntries(curEntries, maxInactiveAge, isEntryPinned)
   }, pingIntervalTime + 1000).unref()
 
   function handleAppDirPing(tree: FlightRouterState): void {

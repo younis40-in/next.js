@@ -1522,5 +1522,9 @@
   "1521": "Failed to close the Next.js custom server",
   "1522": "Failed to transfer the custom-server WebSocket upgrade listener",
   "1523": "Failed to remove the custom-server WebSocket upgrade listener",
-  "1524": "Turbopack subscription and disposal both failed"
+  "1524": "Turbopack subscription and disposal both failed",
+  "1525": "Unresolved Webpack entry dependency for %s",
+  "1526": "Missing Webpack module hash for %s",
+  "1527": "Missing Webpack entry module for %s",
+  "1528": "Missing Webpack entry data for %s"
 }

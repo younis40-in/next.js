@@ -95,6 +95,11 @@ import { isDeferredEntry } from '../../build/entries'
 import { isMetadataRouteFile } from '../../lib/metadata/is-metadata-route'
 import { setBundlerFindSourceMapImplementation } from '../patch-error-inspect'
 import { setBundlerFindSourceMapURLImplementation } from '../lib/source-maps'
+import {
+  closeWebSocketRoute,
+  getWebSocketRouteBundlePath,
+  reloadWebSocketScope,
+} from '../websocket-connection-registry'
 import { getNextErrorFeedbackMiddleware } from '../../next-devtools/server/get-next-error-feedback-middleware'
 import {
   formatIssue,
@@ -250,6 +255,31 @@ function collectUpdatedChunkPaths(
     )
   }
   return Array.from(paths)
+}
+
+/** Maps a Turbopack entry chunk under `server/app` to its route bundle key. */
+export function getWebSocketRouteBundlePathFromTurbopackEntry(
+  entryPath: string
+): string | undefined {
+  const normalizedPath = entryPath.replaceAll('\\', '/')
+  if (
+    normalizedPath.startsWith('/') ||
+    /^[A-Za-z]:\//.test(normalizedPath) ||
+    !normalizedPath.endsWith('.js')
+  ) {
+    return undefined
+  }
+
+  const page = normalizedPath.slice(0, -'.js'.length)
+  if (
+    page.length === 0 ||
+    page
+      .split('/')
+      .some((segment) => segment === '' || segment === '.' || segment === '..')
+  ) {
+    return undefined
+  }
+  return getWebSocketRouteBundlePath(page)
 }
 
 interface ServerHmrSubscriptionLoopOptions {
@@ -1919,6 +1949,12 @@ export async function createHotReloaderTurbopack(
     },
     async invalidate({ reloadAfterInvalidation }) {
       if (reloadAfterInvalidation) {
+        if (
+          nextConfig.experimental.webSocketRouteHandlers &&
+          opts.webSocketRegistryScope
+        ) {
+          void reloadWebSocketScope(opts.webSocketRegistryScope)
+        }
         for (const [key, entrypoint] of currentWrittenEntrypoints) {
           clearRequireCache(key, entrypoint, { force: true })
         }
@@ -2256,10 +2292,62 @@ export async function createHotReloaderTurbopack(
   })
 
   if (serverFastRefresh) {
+    const webSocketRegistryScope = opts.webSocketRegistryScope
+    const invalidateWebSocketRoutes = ({
+      chunkPaths,
+      affectedEntries,
+      hasAffectedEntriesMetadata,
+    }: {
+      chunkPaths: string[]
+      affectedEntries: string[] | undefined
+      hasAffectedEntriesMetadata: boolean
+    }) => {
+      if (
+        !nextConfig.experimental.webSocketRouteHandlers ||
+        !webSocketRegistryScope
+      ) {
+        return
+      }
+
+      if (
+        !hasAffectedEntriesMetadata ||
+        !Array.isArray(affectedEntries) ||
+        (chunkPaths.length > 0 && affectedEntries.length === 0)
+      ) {
+        void reloadWebSocketScope(webSocketRegistryScope)
+        return
+      }
+
+      const bundlePaths = new Set<string>()
+      for (const entryPath of affectedEntries) {
+        if (typeof entryPath !== 'string') {
+          void reloadWebSocketScope(webSocketRegistryScope)
+          return
+        }
+        const bundlePath =
+          getWebSocketRouteBundlePathFromTurbopackEntry(entryPath)
+        if (!bundlePath) {
+          void reloadWebSocketScope(webSocketRegistryScope)
+          return
+        }
+        bundlePaths.add(bundlePath)
+      }
+      for (const bundlePath of bundlePaths) {
+        void closeWebSocketRoute(webSocketRegistryScope, bundlePath)
+      }
+    }
+
     serverHmrTask = setupServerHmr(project, {
       runtimeRoot,
       signal: backgroundSubscriptionController.signal,
       reEvaluateAllModulesExpensive: async () => {
+        if (
+          nextConfig.experimental.webSocketRouteHandlers &&
+          webSocketRegistryScope
+        ) {
+          void reloadWebSocketScope(webSocketRegistryScope)
+        }
+
         // Evict every server-HMR-managed chunk from `require.cache`.
         // Trailing `sep` so e.g. `server/chunks-other/...` doesn't match.
         const serverChunksDir = join(distDir, SERVER_HMR_CHUNKS_DIR) + sep
@@ -2284,12 +2372,14 @@ export async function createHotReloaderTurbopack(
 
         handleServerComponentChanges()
       },
-      onApplied: ({ chunkPaths }) => {
+      onApplied: (update) => {
+        invalidateWebSocketRoutes(update)
+
         // Clear the evalManifest() shared cache for each updated chunk so the
         // next RSC render picks up the HMR-applied module changes. Unlike
         // a full restart, this does NOT clear require.cache — the HMR-applied
         // modules in devModuleCache must persist for dep preservation.
-        for (const chunkPath of chunkPaths) {
+        for (const chunkPath of update.chunkPaths) {
           clearManifestCache(join(distDir, chunkPath))
         }
 
