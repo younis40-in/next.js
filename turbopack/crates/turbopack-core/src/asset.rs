@@ -2,7 +2,8 @@ use anyhow::Result;
 use turbo_rcstr::{RcStr, rcstr};
 use turbo_tasks::{ResolvedVc, Vc};
 use turbo_tasks_fs::{
-    FileContent, FileJsonContent, FileLinesContent, FileSystemPath, LinkContent, LinkType,
+    FileContent, FileJsonContent, FileLinesContent, FileSystemPath, WriteLinkContent,
+    WriteLinkTarget,
 };
 use turbo_tasks_hash::{HashAlgorithm, deterministic_hash};
 
@@ -52,10 +53,12 @@ pub trait Asset {
 #[derive(Clone)]
 pub enum AssetContent {
     File(ResolvedVc<FileContent>),
-    // for the relative link, the target is raw value read from the link
-    // for the absolute link, the target is stripped of the root path while reading
-    // See [LinkContent::Link] for more details.
-    Redirect { target: RcStr, link_type: LinkType },
+    /// A symbolic link. See [`WriteLinkTarget`] for how `target` is interpreted, and
+    /// [`WriteLinkContent`] for why `is_directory` is needed to write it.
+    Redirect {
+        target: WriteLinkTarget,
+        is_directory: bool,
+    },
 }
 
 #[turbo_tasks::value_impl]
@@ -115,11 +118,14 @@ impl AssetContent {
             AssetContent::File(file) => {
                 path.write(**file).as_side_effect().await?;
             }
-            AssetContent::Redirect { target, link_type } => {
+            AssetContent::Redirect {
+                target,
+                is_directory,
+            } => {
                 path.write_symbolic_link_dir(
-                    LinkContent::Link {
+                    WriteLinkContent {
                         target: target.clone(),
-                        link_type: *link_type,
+                        is_directory: *is_directory,
                     }
                     .cell(),
                 )
@@ -134,9 +140,12 @@ impl AssetContent {
     pub async fn hash(&self, salt: Vc<RcStr>, algorithm: HashAlgorithm) -> Result<Vc<RcStr>> {
         Ok(match self {
             AssetContent::File(content) => content.hash(salt, algorithm),
-            AssetContent::Redirect { target, link_type } => Vc::cell(RcStr::from(
+            AssetContent::Redirect {
+                target,
+                is_directory,
+            } => Vc::cell(RcStr::from(
                 // no_hash_salt
-                deterministic_hash(&salt.await?, (target, link_type), algorithm),
+                deterministic_hash(&salt.await?, (target, is_directory), algorithm),
             )),
         })
     }

@@ -1,7 +1,9 @@
 use anyhow::{Result, bail};
 use turbo_rcstr::RcStr;
 use turbo_tasks::Vc;
-use turbo_tasks_fs::{FileContent, FileSystemEntryType, FileSystemPath, LinkContent};
+use turbo_tasks_fs::{
+    FileContent, FileSystemEntryType, FileSystemPath, LinkContent, LinkTarget, WriteLinkTarget,
+};
 
 use crate::{
     asset::{Asset, AssetContent},
@@ -66,11 +68,27 @@ impl Asset for FileSource {
         let file_type = &*self.path.get_type().await?;
         match file_type {
             FileSystemEntryType::Symlink => match &*self.path.read_link().await? {
-                LinkContent::Link { target, link_type } => Ok(AssetContent::Redirect {
-                    target: target.clone(),
-                    link_type: *link_type,
+                LinkContent::Link { target } => {
+                    // Recreate the link with its original spelling, so a relative link stays
+                    // relative. `is_directory` is only needed so that it can be recreated on
+                    // Windows, where directory links must be junction points.
+                    let write_target = match target {
+                        // An absolute target is written back from the filesystem root, which is
+                        // exactly how the resolved path is stored.
+                        LinkTarget::Absolute { resolved } => {
+                            WriteLinkTarget::Absolute(resolved.path.clone())
+                        }
+                        LinkTarget::Relative { raw, .. } => WriteLinkTarget::Relative(raw.clone()),
+                    };
+                    Ok(AssetContent::Redirect {
+                        target: write_target,
+                        is_directory: matches!(
+                            target.target_type().await?,
+                            FileSystemEntryType::Directory
+                        ),
+                    }
+                    .cell())
                 }
-                .cell()),
                 _ => bail!("Invalid symlink"),
             },
             FileSystemEntryType::File => {

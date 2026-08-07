@@ -2,6 +2,7 @@ use anyhow::{Result, bail};
 use turbo_tasks::{ValueToString, Vc};
 use turbo_tasks_fs::{
     FileContent, FileMeta, FileSystem, FileSystemPath, LinkContent, RawDirectoryContent,
+    WriteLinkContent,
 };
 
 #[turbo_tasks::value]
@@ -40,7 +41,11 @@ impl FileSystem for ServerFileSystem {
     }
 
     #[turbo_tasks::function]
-    fn write_link(&self, _fs_path: FileSystemPath, _target: Vc<LinkContent>) -> Result<Vc<()>> {
+    fn write_link(
+        &self,
+        _fs_path: FileSystemPath,
+        _target: Vc<WriteLinkContent>,
+    ) -> Result<Vc<()>> {
         bail!("Writing is not possible to the marker filesystem for the server")
     }
 

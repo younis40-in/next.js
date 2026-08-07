@@ -10,7 +10,6 @@ use std::{
 
 use anyhow::{Result, bail};
 use bincode::{Decode, Encode};
-use bitflags::bitflags;
 use jsonc_parser::{ParseOptions, parse_to_serde_value};
 use mime::Mime;
 use serde_json::Value;
@@ -21,6 +20,7 @@ use turbo_tasks_hash::{
 };
 
 use crate::{
+    FileSystemEntryType, FileSystemPath,
     json::UnparsableJson,
     retry::retry_blocking,
     rope::{Rope, RopeReader},
@@ -163,47 +163,98 @@ pub(crate) enum FileComparison {
     NotEqual,
 }
 
-bitflags! {
-  #[derive(
-    Default,
-    TraceRawVcs,
-    NonLocalValue,
-    DeterministicHash,
-    Encode,
-    Decode,
-  )]
-  pub struct LinkType: u8 {
-      const DIRECTORY = 0b00000001;
-      const ABSOLUTE = 0b00000010;
-  }
+/// The target of a symbolic link, as read from a filesystem.
+///
+/// Every variant carries the `resolved` path the link points at, computed once by
+/// [`crate::FileSystem::read_link`], which is also what guarantees the target stays inside the
+/// filesystem root — a link whose target leaves the root is [`LinkContent::Invalid`] instead.
+#[derive(Clone, Debug, Hash, PartialEq, Eq, TraceRawVcs, NonLocalValue, Encode, Decode)]
+pub enum LinkTarget {
+    /// The link is absolute on disk. Only the resolved path is kept: it is already normalized and
+    /// relative to the *filesystem root*, both so that absolute system paths never end up in the
+    /// persistent cache and because it is what the link is rewritten from when recreated.
+    Absolute { resolved: FileSystemPath },
+    /// `raw` is the value read from the link — unnormalized, may contain `..` — relative to the
+    /// *directory containing the link*.
+    ///
+    /// It must be kept alongside `resolved` so that [`crate::FileSystem::write_link`] round-trips
+    /// it exactly: the value is written verbatim and compared against [`std::fs::read_link`] to
+    /// skip unchanged links.
+    Relative {
+        raw: RcStr,
+        resolved: FileSystemPath,
+    },
 }
 
-/// The contents of a symbolic link. On Windows, this may be a junction point.
+impl LinkTarget {
+    /// The path this link points at.
+    ///
+    /// This is only a single level of resolution: the returned path may itself be a symbolic link.
+    pub fn file_system_path(&self) -> &FileSystemPath {
+        match self {
+            LinkTarget::Absolute { resolved } | LinkTarget::Relative { resolved, .. } => resolved,
+        }
+    }
+
+    /// The type of the file this link points at.
+    ///
+    /// This only follows a single link: if the target is itself a symbolic link, this returns
+    /// [`FileSystemEntryType::Symlink`]. Use [`FileSystemPath::realpath`] to follow a chain of
+    /// links. A dangling target returns [`FileSystemEntryType::NotFound`].
+    pub async fn target_type(&self) -> Result<FileSystemEntryType> {
+        Ok(*self.file_system_path().get_type().await?)
+    }
+}
+
+/// The target of a symbolic link to create, used by [`WriteLinkContent`].
 ///
-/// When reading, we treat symbolic links and junction points on Windows as equivalent. When
-/// creating a new link, we always create junction points, because symlink creation may fail if
-/// Windows "developer mode" is not enabled and we're running in an unprivileged environment.
+/// Unlike [`LinkTarget`] this carries only the raw path: the write side never needs the target
+/// resolved, and the link being created may not even exist yet.
+#[derive(
+    Clone, Debug, Hash, PartialEq, Eq, TraceRawVcs, NonLocalValue, DeterministicHash, Encode, Decode,
+)]
+pub enum WriteLinkTarget {
+    /// Normalized and relative to the *filesystem root*.
+    Absolute(RcStr),
+    /// Written verbatim, relative to the *directory containing the link*.
+    Relative(RcStr),
+}
+
+/// The contents of a symbolic link, as read from a filesystem. On Windows, this may be a junction
+/// point.
+///
+/// We treat symbolic links and junction points on Windows as equivalent when reading.
+///
+/// This describes the link itself and never the type of the file it points at. Use
+/// [`LinkTarget::target_type`] if you need to know whether the target is a directory.
+#[turbo_tasks::value(shared)]
+#[derive(Debug)]
+pub enum LinkContent {
+    /// A valid symbolic link pointing to `target`, which always resolves to a path inside the
+    /// filesystem root.
+    Link { target: LinkTarget },
+    /// There is no usable symbolic link at this path: it doesn't exist, it isn't a link, or its
+    /// target leaves the filesystem root.
+    ///
+    /// A relative target that steps out of the root and back into it is also `Invalid`, since
+    /// resolving it would need the names of the root's own ancestors, which a root-relative path
+    /// doesn't carry.
+    Invalid,
+}
+
+/// The symbolic link to create at a path, passed to [`crate::FileSystem::write_link`].
+///
+/// This is separate from [`LinkContent`] because writing needs to know whether the target is a
+/// directory, while reading a link does not: on Windows we always create junction points for
+/// directories, because symlink creation may fail if "developer mode" is not enabled and we're
+/// running in an unprivileged environment.
 #[turbo_tasks::value(shared)]
 #[derive(Debug, DeterministicHash)]
-pub enum LinkContent {
-    /// A valid symbolic link pointing to `target`, a unix-style path.
-    ///
-    /// If [`LinkType::ABSOLUTE`] is set, `target` is normalized and relative to the *filesystem
-    /// root* (so that absolute system paths never end up in the persistent cache). Otherwise,
-    /// `target` is the raw value read from the link — unnormalized, may contain `..` — and is
-    /// relative to the *directory containing the link*.
-    ///
-    /// A relative `target` must stay raw so that [`FileSystem::write_link`] round-trips it
-    /// exactly: the value is written verbatim and compared against [`std::fs::read_link`] to
-    /// skip unchanged links.
-    Link {
-        target: RcStr,
-        link_type: LinkType,
-    },
-    // Invalid means the link is invalid it points out of the filesystem root
-    Invalid,
-    // The target was not found
-    NotFound,
+pub struct WriteLinkContent {
+    pub target: WriteLinkTarget,
+    /// Whether the target is a directory, which on Windows must be linked with a junction point
+    /// rather than a symlink.
+    pub is_directory: bool,
 }
 
 #[turbo_tasks::value(shared)]

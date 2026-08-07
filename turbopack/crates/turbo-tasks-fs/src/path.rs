@@ -15,8 +15,8 @@ use turbo_unix_path::{get_parent_path, get_relative_path_to, join_path, normaliz
 
 use crate::{
     DirectoryContent, DirectoryEntry, FileContent, FileJsonContent, FileMeta, FileSystem,
-    FileSystemEntryType, LinkContent, LinkType, RawDirectoryContent, RawDirectoryEntry,
-    ReadGlobResult,
+    FileSystemEntryType, LinkContent, RawDirectoryContent, RawDirectoryEntry, ReadGlobResult,
+    WriteLinkContent,
     glob::Glob,
     read_glob::{read_glob, track_glob},
 };
@@ -427,7 +427,7 @@ impl FileSystemPath {
     /// [windows-symlink]: https://blogs.windows.com/windowsdeveloper/2016/12/02/symlinks-windows-10/
     /// [windows-privileges]: https://learn.microsoft.com/en-us/previous-versions/windows/it-pro/windows-10/security/threat-protection/security-policy-settings/create-symbolic-links
     /// [pnpm-windows]: https://pnpm.io/faq#does-it-work-on-windows
-    pub fn write_symbolic_link_dir(&self, target: Vc<LinkContent>) -> Vc<()> {
+    pub fn write_symbolic_link_dir(&self, target: Vc<WriteLinkContent>) -> Vc<()> {
         self.fs().write_link(self.clone(), target)
     }
 
@@ -502,6 +502,10 @@ pub enum RealPathResultError {
     TooManySymlinks,
     CycleDetected,
     Invalid,
+    /// A symbolic link we followed points at something that doesn't exist.
+    ///
+    /// Only resolution can report this: [`crate::FileSystem::read_link`] deliberately never looks
+    /// at the target, so a dangling link still reads back as a valid [`LinkContent::Link`].
     NotFound,
 }
 
@@ -527,7 +531,8 @@ impl RealPathResultError {
                 turbofmt!("Symlink {orig} is in a symlink loop: {symlinks_dbg}").await?
             }
             RealPathResultError::Invalid => {
-                turbofmt!("Symlink {orig} is invalid, it points out of the filesystem root").await?
+                turbofmt!("Symlink {orig} is invalid, its target leaves the filesystem root")
+                    .await?
             }
             RealPathResultError::NotFound => {
                 turbofmt!("Symlink {orig} is invalid, it points at a file that doesn't exist")
@@ -595,6 +600,9 @@ async fn realpath_with_links(path: FileSystemPath) -> Result<Vc<RealPathResult>>
     let mut symlinks: IndexSet<FileSystemPath> = IndexSet::new();
     let mut visited: AutoSet<RcStr> = AutoSet::new();
     let mut error = RealPathResultError::TooManySymlinks;
+    // Whether a previous iteration resolved a symbolic link, so `current_path` is now a link
+    // target rather than the path we were asked about.
+    let mut followed_link = false;
     // Pick some arbitrary symlink depth limit... similar to the ELOOP logic for realpath(3).
     // SYMLOOP_MAX is 40 for Linux: https://unix.stackexchange.com/q/721724
     for _i in 0..40 {
@@ -620,25 +628,31 @@ async fn realpath_with_links(path: FileSystemPath) -> Result<Vc<RealPathResult>>
             .rsplit_once('/')
             .map_or(current_path.path.as_str(), |(_, name)| name);
         symlinks.extend(parent_result.symlinks);
-        let parent_path = match parent_result.path_result {
+        match parent_result.path_result {
             Ok(path) => {
                 if path != parent {
                     current_path = path.join(basename)?;
                 }
-                path
             }
             Err(parent_error) => {
                 error = parent_error;
                 break;
             }
-        };
+        }
 
         // use `get_type` before trying `read_link`, as there's a good chance of a cache hit on
         // `get_type`, and `read_link` isn't the common codepath.
-        if !matches!(
-            *current_path.get_type().await?,
-            FileSystemEntryType::Symlink
-        ) {
+        let entry_type = *current_path.get_type().await?;
+        if !matches!(entry_type, FileSystemEntryType::Symlink) {
+            // A link we followed points at something that doesn't exist. `read_link` can't detect
+            // this, as it never looks at the target, so a dangling link reads back as valid.
+            //
+            // Only report this for a link we actually followed: resolving a path that simply
+            // doesn't exist is not an error, it just resolves to itself.
+            if followed_link && matches!(entry_type, FileSystemEntryType::NotFound) {
+                error = RealPathResultError::NotFound;
+                break;
+            }
             return Ok(RealPathResult {
                 path_result: Ok(current_path),
                 symlinks: symlinks.into_iter().collect(), // convert set to vec
@@ -646,19 +660,13 @@ async fn realpath_with_links(path: FileSystemPath) -> Result<Vc<RealPathResult>>
             .cell());
         }
 
-        match &*current_path.read_link().await? {
-            LinkContent::Link { target, link_type } => {
-                symlinks.insert(current_path.clone());
-                current_path = if link_type.contains(LinkType::ABSOLUTE) {
-                    current_path.root().owned().await?
-                } else {
-                    parent_path
-                }
-                .join(target)?;
-            }
-            LinkContent::NotFound => {
-                error = RealPathResultError::NotFound;
-                break;
+        let link_content = current_path.read_link().await?;
+        match &*link_content {
+            LinkContent::Link { target } => {
+                let target_path = target.file_system_path().clone();
+                symlinks.insert(current_path);
+                current_path = target_path;
+                followed_link = true;
             }
             LinkContent::Invalid => {
                 error = RealPathResultError::Invalid;

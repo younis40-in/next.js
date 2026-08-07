@@ -14,7 +14,7 @@ use turbo_tasks::{
     NonLocalValue, TaskInput, ValueToString, Vc, debug::ValueDebugFormat, trace::TraceRawVcs,
 };
 use turbo_tasks_fs::{
-    FileSystemPath, LinkContent, LinkType, RawDirectoryContent, RawDirectoryEntry,
+    FileSystemEntryType, FileSystemPath, LinkContent, RawDirectoryContent, RawDirectoryEntry,
 };
 use turbo_unix_path::normalize_path;
 
@@ -1606,12 +1606,13 @@ pub async fn read_matches(
                         )),
                         RawDirectoryEntry::Symlink => {
                             let fs_path = parent_fs_path.join(last_segment)?;
-                            let LinkContent::Link { link_type, .. } = &*fs_path.read_link().await?
-                            else {
+                            let link_content = fs_path.read_link().await?;
+                            let LinkContent::Link { target } = &*link_content else {
                                 continue;
                             };
                             let path = concat(&prefix, str).into();
-                            if link_type.contains(LinkType::DIRECTORY) {
+                            if matches!(target.target_type().await?, FileSystemEntryType::Directory)
+                            {
                                 results.push((index, PatternMatch::Directory(path, fs_path)));
                             } else {
                                 results.push((index, PatternMatch::File(path, fs_path)))
@@ -1793,50 +1794,51 @@ pub async fn read_matches(
                                 if prefix.ends_with('/') {
                                     prefix.pop();
                                 }
-                                if let Some(pos) = pat.match_position(&prefix) {
+                                // {prefix}{key}
+                                let file_len = prefix.len();
+                                let as_file_pos = pat.match_position(&prefix);
+                                // {prefix}{key}/
+                                prefix.push('/');
+                                let as_dir_positions = [
+                                    pat.match_position(&prefix),
+                                    pat.could_match_position(&prefix),
+                                ];
+
+                                // Only read the link if something could match it, as that requires
+                                // reading the type of the link's target.
+                                if as_file_pos.is_some()
+                                    || as_dir_positions.iter().any(Option::is_some)
+                                {
                                     let fs_path = lookup_dir.join(key)?;
-                                    if let LinkContent::Link { link_type, .. } =
-                                        &*fs_path.read_link().await?
-                                    {
-                                        if link_type.contains(LinkType::DIRECTORY) {
+                                    // Skip links that leave the filesystem root.
+                                    let link_content = fs_path.read_link().await?;
+                                    if let LinkContent::Link { target } = &*link_content {
+                                        let is_directory = matches!(
+                                            target.target_type().await?,
+                                            FileSystemEntryType::Directory
+                                        );
+                                        if let Some(pos) = as_file_pos {
+                                            let path = prefix[..file_len].into();
                                             results.push((
                                                 pos,
-                                                PatternMatch::Directory(
-                                                    prefix.clone().into(),
-                                                    fs_path,
-                                                ),
-                                            ));
-                                        } else {
-                                            results.push((
-                                                pos,
-                                                PatternMatch::File(prefix.clone().into(), fs_path),
+                                                if is_directory {
+                                                    PatternMatch::Directory(path, fs_path.clone())
+                                                } else {
+                                                    PatternMatch::File(path, fs_path.clone())
+                                                },
                                             ));
                                         }
-                                    }
-                                }
-                                prefix.push('/');
-                                if let Some(pos) = pat.match_position(&prefix) {
-                                    let fs_path = lookup_dir.join(key)?;
-                                    if let LinkContent::Link { link_type, .. } =
-                                        &*fs_path.read_link().await?
-                                        && link_type.contains(LinkType::DIRECTORY)
-                                    {
-                                        results.push((
-                                            pos,
-                                            PatternMatch::Directory(prefix.clone().into(), fs_path),
-                                        ));
-                                    }
-                                }
-                                if let Some(pos) = pat.could_match_position(&prefix) {
-                                    let fs_path = lookup_dir.join(key)?;
-                                    if let LinkContent::Link { link_type, .. } =
-                                        &*fs_path.read_link().await?
-                                        && link_type.contains(LinkType::DIRECTORY)
-                                    {
-                                        results.push((
-                                            pos,
-                                            PatternMatch::Directory(prefix.clone().into(), fs_path),
-                                        ));
+                                        if is_directory {
+                                            for pos in as_dir_positions.into_iter().flatten() {
+                                                results.push((
+                                                    pos,
+                                                    PatternMatch::Directory(
+                                                        prefix.clone().into(),
+                                                        fs_path.clone(),
+                                                    ),
+                                                ));
+                                            }
+                                        }
                                     }
                                 }
                                 prefix.truncate(len)
