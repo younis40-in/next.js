@@ -11,6 +11,8 @@ import { isRequestApiAllowedInCurrentPhase } from './utils'
 import { InvariantError } from '../../shared/lib/invariant-error'
 import { RenderStage } from '../app-render/staged-rendering'
 
+export const STATIC_PRERENDER_NAVIGATION_STAGE = RenderStage.Static
+
 /**
  * This function allows you to indicate that the subsequent code should be
  * deferred to the actual navigation instead of rendering during a runtime
@@ -60,7 +62,7 @@ export function unstable_navigation(): Promise<void> {
       } else {
         // Final prerender
         return stagedRendering.delayUntilStage(
-          RenderStage.Static,
+          STATIC_PRERENDER_NAVIGATION_STAGE,
           'unstable_navigation',
           undefined
         )
