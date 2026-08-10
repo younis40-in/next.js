@@ -199,6 +199,19 @@ export function clearServerHmrChunkCaches(runtimeRoot: string): void {
   }
 }
 
+/**
+ * Matches the runtime root embedded in emitted Turbopack chunks. The runtime
+ * derives its root from `__filename`, which Node canonicalizes through
+ * symlinks, so the hot-reloader must use the same filesystem identity.
+ */
+export function getServerHmrRuntimeRoot(distDir: string): string {
+  try {
+    return realpathSync(distDir)
+  } catch {
+    return resolvePath(distDir)
+  }
+}
+
 function removeServerHmrHandlers(runtimeRoot: string): void {
   const handlers = globalThis.__turbopack_server_hmr_handlers__
   if (!handlers) return
@@ -503,7 +516,6 @@ export async function createHotReloaderTurbopack(
   const dev = true
   const buildId = 'development'
   const { nextConfig, dir: projectPath } = opts
-  const runtimeRoot = resolvePath(distDir)
 
   const bindings = getBindingsSync()
 
@@ -619,6 +631,7 @@ export async function createHotReloaderTurbopack(
       isShortSession: false,
     }
   )
+  const runtimeRoot = getServerHmrRuntimeRoot(distDir)
   const backgroundSubscriptionController = new AbortController()
   const backgroundCompilationEvents = backgroundLogCompilationEvents(project, {
     eventTypes: [
@@ -635,12 +648,8 @@ export async function createHotReloaderTurbopack(
     getSourceMapFromTurbopack.bind(null, project)
   )
 
-  let canonicalDistDir = distDir
-  try {
-    canonicalDistDir = realpathSync(distDir)
-  } catch {}
   setBundlerFindSourceMapURLImplementation(
-    getSourceMapURLFromTurbopack.bind(null, canonicalDistDir)
+    getSourceMapURLFromTurbopack.bind(null, runtimeRoot)
   )
 
   // Set up code frame renderer using native bindings
