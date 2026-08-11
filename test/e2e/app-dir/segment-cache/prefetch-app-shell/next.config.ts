@@ -8,6 +8,7 @@ const nextConfig: NextConfig = {
     cachedNavigations: true,
     varyParams: true,
   },
+  productionBrowserSourceMaps: true,
 }
 
 export default nextConfig
