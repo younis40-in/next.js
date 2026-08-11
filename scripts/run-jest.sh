@@ -56,6 +56,32 @@ while [ $# -gt 0 ]; do
   shift
 done
 
+# `__NEXT_EXPERIMENTAL_CI_SHARD` numbers the extra runs of the test matrix: CI
+# runs the suites once plainly and again per shard, and a fixture keys an
+# experimental flag on a shard number to cover both states of the flag —
+# enabled by default, disabled in that shard:
+#
+#   experimental: {
+#     useOffline: process.env.__NEXT_EXPERIMENTAL_CI_SHARD !== '1',
+#   }
+#
+# paired with a `// @gate useOffline` on the suite: a plain run — including a
+# local run with no special env — exercises the feature, and the shard run
+# asserts it is inert when disabled (see test/lib/gate/README.md).
+#
+# For now there is a single shard, `1`, and it is an alias for
+# `__NEXT_CACHE_COMPONENTS` (the `--experimental` run) rather than a CI
+# dimension of its own. That works because most experiments hard-code
+# `cacheComponents: true` in their fixture anyway — the cache-components env
+# default only applies to fixtures that don't set it themselves, so for these
+# fixtures that run is free to double as the shard run. Setting either name
+# implies the other.
+if [ -n "${__NEXT_EXPERIMENTAL_CI_SHARD:-}" ]; then
+  export __NEXT_CACHE_COMPONENTS=true
+elif [ "${__NEXT_CACHE_COMPONENTS:-}" = "true" ]; then
+  export __NEXT_EXPERIMENTAL_CI_SHARD=1
+fi
+
 # Resolves to `node_modules/.bin/jest` via `$PATH`. This relies on being
 # invoked through pnpm (or another package runner), which prepends the
 # workspace's `node_modules/.bin/` to `$PATH` before running the script.
