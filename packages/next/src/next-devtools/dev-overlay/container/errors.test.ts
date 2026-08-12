@@ -13,6 +13,9 @@ import {
   createLinkBodyErrorInNavigation,
   createLinkMetadataError,
   createLinkViewportError,
+  createNavigationBodyErrorInNavigation,
+  createNavigationMetadataError,
+  createNavigationViewportError,
 } from '../../../server/app-render/blocking-route-messages'
 import {
   createSyncIOClientError,
@@ -37,25 +40,6 @@ const ROUTE = '/example'
 
 describe('getGuidanceVariant', () => {
   describe('classifies runtime messages as runtime', () => {
-    describe('classifies link messages as link', () => {
-      it.each([
-        {
-          description: 'body',
-          error: () => createLinkBodyErrorInNavigation(ROUTE),
-        },
-        {
-          description: 'metadata',
-          error: () => createLinkMetadataError(ROUTE),
-        },
-        {
-          description: 'viewport',
-          error: () => createLinkViewportError(ROUTE),
-        },
-      ])('$description', ({ error }) => {
-        expect(getGuidanceVariant(error().message)).toBe('link')
-      })
-    })
-
     it.each([
       { description: 'body', error: () => createRuntimeBodyError(ROUTE) },
       {
@@ -72,6 +56,44 @@ describe('getGuidanceVariant', () => {
       },
     ])('$description', ({ error }) => {
       expect(getGuidanceVariant(error().message)).toBe('runtime')
+    })
+  })
+
+  describe('classifies link messages as link', () => {
+    it.each([
+      {
+        description: 'body',
+        error: () => createLinkBodyErrorInNavigation(ROUTE),
+      },
+      {
+        description: 'metadata',
+        error: () => createLinkMetadataError(ROUTE),
+      },
+      {
+        description: 'viewport',
+        error: () => createLinkViewportError(ROUTE),
+      },
+    ])('$description', ({ error }) => {
+      expect(getGuidanceVariant(error().message)).toBe('link')
+    })
+  })
+
+  describe('classifies navigation messages as navigation', () => {
+    it.each([
+      {
+        description: 'body',
+        error: () => createNavigationBodyErrorInNavigation(ROUTE),
+      },
+      {
+        description: 'metadata',
+        error: () => createNavigationMetadataError(ROUTE),
+      },
+      {
+        description: 'viewport',
+        error: () => createNavigationViewportError(ROUTE),
+      },
+    ])('$description', ({ error }) => {
+      expect(getGuidanceVariant(error().message)).toBe('navigation')
     })
   })
 
