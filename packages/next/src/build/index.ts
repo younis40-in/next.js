@@ -3001,6 +3001,10 @@ export default async function build(
       >()
       // Keyed by the route's output path, so that the manifest sits next to the
       // route's other output and is reachable from its `.nft.json`.
+      //
+      // `outputPath` must already be the route's output path, not its route
+      // path: for pages that means it has been through `normalizePagePath`,
+      // which is not idempotent (`/` -> `/index` -> `/index/index`).
       function getPrerenderRoutesEntry(
         pageType: 'app' | 'pages',
         outputPath: string
@@ -3015,7 +3019,7 @@ export default async function build(
             normalizeAppPath(outputPath).replace(/%5F/g, '_')
           )
         } else {
-          outputPath = path.posix.join('pages', normalizePagePath(outputPath))
+          outputPath = path.posix.join('pages', outputPath)
         }
         let entry = prerenderRoutes.get(outputPath)
         if (!entry) {
@@ -4416,7 +4420,7 @@ export default async function build(
       for (const page of Object.keys(pagesManifest)) {
         // `/_app` and `/_document` are not route modules and never load one.
         if (page === '/_app' || page === '/_document') continue
-        getPrerenderRoutesEntry('pages', page)
+        getPrerenderRoutesEntry('pages', normalizePagePath(page))
       }
       for (const originalAppPath of Object.keys(appPathRoutes)) {
         getPrerenderRoutesEntry('app', originalAppPath)

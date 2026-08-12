@@ -500,15 +500,19 @@ export async function collectBuildTraces({
               entryName !== 'pages/_app' &&
               entryName !== 'pages/_document'
             ) {
-              // The manifest lives at the normalized route path, which is shared
-              // by all the app paths serving it (a page and its parallel slots).
-              // That isn't always this chunk's own directory, so resolve it
-              // relative to the trace file.
+              // For app routes the manifest lives at the normalized route path,
+              // which is shared by all the app paths serving it (a page and its
+              // parallel slots). That isn't always this chunk's own directory,
+              // so resolve it relative to the trace file.
+              //
+              // Pages routes get one each, in their own directory. `entryName`
+              // is already the normalized page path, so it must not be run
+              // through `normalizePagePath` again -- that isn't idempotent and
+              // would turn `pages/index` into `pages/index/index`.
               const manifestPath = path.join(
                 distDir,
                 'server',
-                isApp ? 'app' : 'pages',
-                route,
+                isApp ? path.join('app', route) : entryName,
                 PRERENDER_MANIFEST
               )
               curTracedFiles.add(
