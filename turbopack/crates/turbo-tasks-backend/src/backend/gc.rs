@@ -579,7 +579,7 @@ impl TurboTasksBackend {
             // anchored), so a re-parented resident task fails here.
             match self
                 .storage
-                .with_task(id, |t| (t.gc_is_root(), t.gc_is_deleted()))
+                .with_task(id, |t| (t.gc_is_root(), t.flags.deleted()))
             {
                 // Already collected (soft-deleted, resident until the tombstone commit + hard
                 // delete). It is not a root any more and there is nothing left to collect, so drop
