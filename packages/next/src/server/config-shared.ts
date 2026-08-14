@@ -1366,10 +1366,11 @@ export interface ExperimentalConfig {
   globalNotFound?: boolean
 
   /**
-   * Uses strict App Router matching semantics for parallel routes. Set this to
-   * `false` to temporarily restore the legacy matching behavior.
+   * Only includes `children` in a parallel route layout when an ordinary route
+   * branch declares content for it. Set this to `false` to temporarily restore
+   * the legacy implicit `children` slot.
    */
-  strictRouteMatching?: boolean
+  explicitParallelRouteChildren?: boolean
 
   /**
    * @experimental Use the Rust port of the React compiler (Turbopack only).
@@ -2310,7 +2311,7 @@ export const defaultConfig = Object.freeze({
     useCache: undefined,
     slowModuleDetection: undefined,
     globalNotFound: false,
-    strictRouteMatching: false,
+    explicitParallelRouteChildren: true,
     browserDebugInfoInTerminal: 'warn',
     lockDistDir: true,
     disableResumeDataCacheCompression: false,
