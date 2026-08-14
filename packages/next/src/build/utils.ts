@@ -78,7 +78,11 @@ import type {
   AppRouteModule,
   AppRouteRouteModule,
 } from '../server/route-modules/app-route/module'
-import type { FunctionsConfigManifest, ManifestRoute } from './index'
+import type {
+  FunctionsConfigManifest,
+  ManifestRoute,
+  PrerenderManifest,
+} from './index'
 import { getNamedRouteRegex } from '../shared/lib/router/utils/route-regex'
 import { parseNormalizedAppRoute } from '../shared/lib/router/routes/app'
 import { getStaticMetadataPrerenderPathname } from '../lib/metadata/get-metadata-route'
@@ -590,6 +594,82 @@ export async function printTreeView(
   print()
 }
 
+type PrerenderMatcherDigestEntry = {
+  behavior: 'not-found' | 'blocking' | 'fallback' | 'prerender'
+  pathname: string
+}
+
+function countDynamicSegments(pathname: string): number {
+  return pathname.match(/\[[^/]+\]/g)?.length ?? 0
+}
+
+/** Prints the concrete request matchers emitted for the experimental API. */
+export function printPrerenderMatchers(
+  sourceRoutes: ReadonlySet<string>,
+  prerenderManifest: Pick<PrerenderManifest, 'routes' | 'dynamicRoutes'>,
+  emittedDynamicRoutes: ReadonlyArray<DynamicManifestRoute>
+): void {
+  if (sourceRoutes.size === 0) return
+
+  print(underline('Experimental prerender matchers'))
+  print('More-specific rows override broader rows for the same request.')
+  print()
+
+  for (const sourceRoute of [...sourceRoutes].sort()) {
+    const matchers = Object.entries(prerenderManifest.dynamicRoutes)
+      .filter(
+        ([pathname, route]) =>
+          pathname === sourceRoute || route.fallbackSourceRoute === sourceRoute
+      )
+      .map<PrerenderMatcherDigestEntry>(([pathname, route]) => ({
+        behavior:
+          route.fallback === false
+            ? 'not-found'
+            : route.fallback === null
+              ? 'blocking'
+              : 'fallback',
+        pathname,
+      }))
+      .sort(
+        (a, b) =>
+          countDynamicSegments(b.pathname) - countDynamicSegments(a.pathname) ||
+          a.pathname.localeCompare(b.pathname)
+      )
+
+    const prerenders = Object.entries(prerenderManifest.routes)
+      .filter(([, route]) => route.srcRoute === sourceRoute)
+      .map<PrerenderMatcherDigestEntry>(([pathname]) => ({
+        behavior: 'prerender',
+        pathname,
+      }))
+      .sort((a, b) => a.pathname.localeCompare(b.pathname))
+
+    const entries = [...matchers, ...prerenders]
+    const width = Math.max(...entries.map(({ behavior }) => behavior.length))
+    print(sourceRoute)
+    entries.forEach(({ behavior, pathname }, index) => {
+      print(
+        `  ${index === entries.length - 1 ? '└' : '├'} ${behavior.padEnd(width)}  ${pathname}`
+      )
+    })
+    print()
+  }
+
+  print(underline('Emitted dynamic route patterns'))
+  print('These are the patterns available to deployment routing metadata.')
+  print()
+  for (const sourceRoute of [...sourceRoutes].sort()) {
+    const patterns = emittedDynamicRoutes.filter(
+      (route) => route.page === sourceRoute || route.sourcePage === sourceRoute
+    )
+    print(`${sourceRoute} (${patterns.length})`)
+    patterns.forEach((route, index) => {
+      print(`  ${index === patterns.length - 1 ? '└' : '├'} ${route.page}`)
+    })
+    print()
+  }
+}
+
 export function printCustomRoutes({
   redirects,
   rewrites,
@@ -671,6 +751,7 @@ export function printCustomRoutes({
 type PageIsStaticResult = {
   isRoutePPREnabled?: boolean
   isStatic?: boolean
+  hasPrerenderMatcher?: true
   hasServerProps?: boolean
   hasStaticProps?: boolean
   prerenderedRoutes: PrerenderedRoute[] | undefined
@@ -695,6 +776,7 @@ export async function isPageStatic({
   edgeInfo,
   pageType,
   cacheComponents,
+  experimentalPrerenderMatching,
   authInterrupts,
   useCacheTimeout,
   staticPageGenerationTimeout,
@@ -715,6 +797,7 @@ export async function isPageStatic({
   page: string
   distDir: string
   cacheComponents: boolean
+  experimentalPrerenderMatching: boolean
   authInterrupts: boolean
   useCacheTimeout: number
   staticPageGenerationTimeout: number
@@ -773,6 +856,7 @@ export async function isPageStatic({
       let componentsResult: LoadComponentsReturnType
       let prerenderedRoutes: PrerenderedRoute[] | undefined
       let prerenderFallbackMode: FallbackMode | undefined
+      let hasPrerenderMatcher: true | undefined
       let appConfig: AppSegmentConfig = {}
       let rootParamKeys: readonly string[] | undefined
       const pathIsEdgeRuntime = isEdgeRuntime(pageRuntime)
@@ -893,29 +977,33 @@ export async function isPageStatic({
             ;({ prerenderedRoutes, fallbackMode: prerenderFallbackMode } =
               buildStaticMetadataStaticPaths(page))
           } else {
-            ;({ prerenderedRoutes, fallbackMode: prerenderFallbackMode } =
-              await buildAppStaticPaths({
-                dir,
-                page,
-                route,
-                cacheComponents,
-                authInterrupts,
-                useCacheTimeout,
-                staticPageGenerationTimeout,
-                segments,
-                distDir,
-                requestHeaders: {},
-                isrFlushToDisk,
-                cacheMaxMemorySize,
-                cacheHandler,
-                cacheLifeProfiles,
-                ComponentMod,
-                nextConfigOutput,
-                isRoutePPREnabled,
-                buildId,
-                deploymentId,
-                rootParamKeys,
-              }))
+            ;({
+              prerenderedRoutes,
+              fallbackMode: prerenderFallbackMode,
+              hasPrerenderMatcher,
+            } = await buildAppStaticPaths({
+              dir,
+              page,
+              route,
+              cacheComponents,
+              experimentalPrerenderMatching,
+              authInterrupts,
+              useCacheTimeout,
+              staticPageGenerationTimeout,
+              segments,
+              distDir,
+              requestHeaders: {},
+              isrFlushToDisk,
+              cacheMaxMemorySize,
+              cacheHandler,
+              cacheLifeProfiles,
+              ComponentMod,
+              nextConfigOutput,
+              isRoutePPREnabled,
+              buildId,
+              deploymentId,
+              rootParamKeys,
+            }))
           }
         }
       } else {
@@ -986,6 +1074,7 @@ export async function isPageStatic({
       return {
         isStatic,
         isRoutePPREnabled,
+        hasPrerenderMatcher,
         prerenderFallbackMode,
         prerenderedRoutes,
         rootParamKeys,

@@ -127,6 +127,7 @@ import { trace, flushAllTraces, setGlobal, type Span } from '../trace'
 import { writeRouteBundleStats } from './route-bundle-stats'
 import {
   detectConflictingPaths,
+  printPrerenderMatchers,
   printCustomRoutes,
   printTreeView,
   copyTracedFiles,
@@ -236,6 +237,21 @@ import { buildCustomRoute } from '../lib/build-custom-route'
 import { validateAppPaths } from './validate-app-paths'
 
 type Fallback = null | boolean | string
+
+function shouldRenderPrerenderedRoute(
+  route: PrerenderedRoute,
+  hasPrerenderMatcher: boolean
+): boolean {
+  if (!hasPrerenderMatcher) return true
+
+  // Blocking and not-found entries describe request matching behavior. They
+  // intentionally have no shell output. Concrete prerenders and fallback
+  // entries still need export jobs.
+  return (
+    !route.fallbackRouteParams?.length ||
+    route.fallbackMode === FallbackMode.PRERENDER
+  )
+}
 
 export type PrerenderRouteType = 'route' | 'fallback' | 'shell' | 'page'
 export type PrerenderResponse = 'empty' | 'initial' | 'complete'
@@ -2165,6 +2181,7 @@ export default async function build(
       const additionalPaths = new Map<string, PrerenderedRoute[]>()
       const staticPaths = new Map<string, PrerenderedRoute[]>()
       const appNormalizedPaths = new Map<string, string>()
+      const prerenderMatcherRoutes = new Set<string>()
       const fallbackModes = new Map<string, FallbackMode>()
       const appDefaultConfigs = new Map<string, AppSegmentConfig>()
       const pageInfos: PageInfos = new Map<string, PageInfo>()
@@ -2247,6 +2264,9 @@ export default async function build(
               distDir,
               configFileName,
               cacheComponents: isAppCacheComponentsEnabled,
+              experimentalPrerenderMatching: Boolean(
+                config.experimental.prerenderMatching
+              ),
               authInterrupts: isAuthInterruptsEnabled,
               useCacheTimeout: config.experimental.useCacheTimeout,
               staticPageGenerationTimeout: config.staticPageGenerationTimeout,
@@ -2475,6 +2495,9 @@ export default async function build(
                             edgeInfo,
                             pageType,
                             cacheComponents: isAppCacheComponentsEnabled,
+                            experimentalPrerenderMatching: Boolean(
+                              config.experimental.prerenderMatching
+                            ),
                             authInterrupts: isAuthInterruptsEnabled,
                             useCacheTimeout:
                               config.experimental.useCacheTimeout,
@@ -2501,6 +2524,9 @@ export default async function build(
 
                       if (pageType === 'app' && originalAppPath) {
                         appNormalizedPaths.set(originalAppPath, page)
+                        if (workerResult.hasPrerenderMatcher) {
+                          prerenderMatcherRoutes.add(page)
+                        }
                         // TODO-APP: handle prerendering with edge
                         if (isEdgeRuntime(pageRuntime)) {
                           isStatic = false
@@ -2533,9 +2559,14 @@ export default async function build(
                               originalAppPath,
                               workerResult.prerenderedRoutes
                             )
-                            ssgPageRoutes = workerResult.prerenderedRoutes.map(
-                              (route) => route.pathname
-                            )
+                            ssgPageRoutes = workerResult.prerenderedRoutes
+                              .filter((route) =>
+                                shouldRenderPrerenderedRoute(
+                                  route,
+                                  Boolean(workerResult.hasPrerenderMatcher)
+                                )
+                              )
+                              .map((route) => route.pathname)
                             isSSG = true
                           }
 
@@ -3101,12 +3132,24 @@ export default async function build(
               sortedStaticPaths.forEach(([originalAppPath, routes]) => {
                 const appConfig = appDefaultConfigs.get(originalAppPath)
                 const isDynamicError = appConfig?.dynamic === 'error'
+                const normalizedAppPath =
+                  appNormalizedPaths.get(originalAppPath)
+                const hasPrerenderMatcher = normalizedAppPath
+                  ? prerenderMatcherRoutes.has(normalizedAppPath)
+                  : false
 
                 const isRoutePPREnabled: boolean = appConfig
                   ? checkIsRoutePPREnabled(config.experimental.ppr)
                   : false
 
                 routes.forEach((route) => {
+                  if (
+                    !shouldRenderPrerenderedRoute(route, hasPrerenderMatcher)
+                  ) {
+                    delete defaultMap[route.pathname]
+                    return
+                  }
+
                   // If the route has any dynamic root segments, we need to skip
                   // rendering the route. This is because we don't support
                   // revalidating the shells without the parameters present.
@@ -4516,6 +4559,12 @@ export default async function build(
           functionsConfigManifest,
           hasGSPAndRevalidateZero,
         })
+      )
+
+      printPrerenderMatchers(
+        prerenderMatcherRoutes,
+        prerenderManifest,
+        routesManifest.dynamicRoutes
       )
 
       if (bundler === Bundler.Turbopack) {
