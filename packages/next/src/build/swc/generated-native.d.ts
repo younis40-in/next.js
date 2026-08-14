@@ -494,7 +494,16 @@ export interface NapiRoute {
 }
 
 export interface NapiServerHmrUpdate {
-  update: any
+  kind: ServerHmrUpdateKind
+  /**
+   * The instruction for the Node.js runtime to apply. Opaque here because
+   * only that runtime interprets it. Present for `Partial` only.
+   *
+   * `unknown` rather than the `any` napi infers for a JSON value, so the
+   * consumer has to narrow it (`ServerHmrUpdate` in `swc/types.ts`) instead
+   * of silently treating it as whatever it likes.
+   */
+  instruction?: unknown
   /**
    * Absent when the update carries no new version (nothing changed), in
    * which case the caller keeps the one it already has.
@@ -737,6 +746,20 @@ export declare function queryTraceSpans(
 export declare function rootTaskDispose(rootTask: {
   __napiType: 'RootTask'
 }): void
+
+/** What the caller has to do with a server HMR pull's result. */
+export declare const enum ServerHmrUpdateKind {
+  /**
+   * Nothing to apply: either nothing changed since `from`, or the update only
+   * advances the version (the session's first pull, or a new endpoint). A
+   * `version` may still be handed back to diff the next pull against.
+   */
+  None = 'none',
+  /** `instruction` patches the running module graph in place. */
+  Partial = 'partial',
+  /** The update can't be applied incrementally; re-evaluate from disk. */
+  Restart = 'restart',
+}
 
 export interface StackFrame {
   isServer: boolean

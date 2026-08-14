@@ -84,8 +84,7 @@ use turbopack_core::{
     reference_type::{CommonJsReferenceSubType, ReferenceType},
     resolve::{FindContextFileResult, find_context_file},
     version::{
-        NotFoundVersion, OptionVersionedContent, PartialUpdate, TotalUpdate, Update, Version,
-        VersionState, VersionedContent,
+        NotFoundVersion, OptionVersionedContent, Update, Version, VersionState, VersionedContent,
     },
 };
 #[cfg(feature = "process_pool")]
@@ -96,7 +95,7 @@ use turbopack_node::worker_threads_backend;
 use turbopack_nodejs::NodeJsChunkingContext;
 
 use crate::{
-    aggregate_hmr::{AggregateHmrVersion, ChunkListUpdateBuilder, DiffResult, diff_chunks_against},
+    aggregate_hmr::HmrChunksWithContent,
     app::{AppProject, OptionAppProject},
     empty::EmptyEndpoint,
     entrypoints::Entrypoints,
@@ -2534,78 +2533,19 @@ impl Project {
         }
     }
 
-    /// A single `Update` whose combined `ChunkListUpdate` is the union of the
-    /// server entry chunk diffs.
+    /// The server entry chunks a server HMR pull diffs.
     ///
-    /// Each tracked entry chunk's own update is a `ChunkListUpdate` (carrying
-    /// the module deltas for its shared chunks via the merger) or a bare
-    /// `EcmascriptMergedUpdate`; both are folded into one `ChunkListUpdate` that
-    /// the runtime applies exactly as it would a single chunk list.
-    ///
-    /// All-or-nothing restart: any chunk needing `Total`/`Missing` escalates
-    /// the whole batch to `Total` (the runtime can't partially restart). New
-    /// chunks absent from `from` are skipped; the runtime require()s them on
-    /// demand.
-    ///
-    /// `from` is supplied by the caller, which owns the last version it was
-    /// handed (see the returned `Update`'s `to`). A caller with no version yet
-    /// passes [`NotFoundVersion`]: nothing diffs against it, so the first pull
-    /// reports no changes and only serves to hand back the current version.
+    /// Keyed on nothing but the project, so a pull always resolves to this one
+    /// task no matter which version it is diffing from. The diff itself is
+    /// [`compute_server_hmr_update`], which runs outside the task graph for that
+    /// reason.
     #[turbo_tasks::function]
-    pub async fn server_hmr_update(
-        self: Vc<Self>,
-        from: Vc<Box<dyn Version>>,
-    ) -> Result<Vc<Update>> {
+    pub async fn server_hmr_chunks(self: Vc<Self>) -> Result<Vc<HmrChunksWithContent>> {
         let Some(map) = self.await?.versioned_content_map else {
             bail!("must be in dev mode to hmr")
         };
         let root = self.server_hmr_root_path().owned().await?;
-        let chunks_versioned_content = map.hmr_chunks_in_path(root).await?;
-
-        // No chunks to diff yet (e.g. before any endpoints have been written).
-        if chunks_versioned_content.is_empty() {
-            return Ok(Update::None.cell());
-        }
-
-        // Build `to` up front so we can return it on every escape hatch below.
-        let to_aggregate = AggregateHmrVersion::from_chunks(&chunks_versioned_content).await?;
-        let to_ref = Vc::upcast::<Box<dyn Version>>(to_aggregate)
-            .into_trait_ref()
-            .await?;
-
-        let DiffResult {
-            chunk_updates,
-            has_new_chunks,
-        } = diff_chunks_against(&chunks_versioned_content, from).await?;
-
-        // Nothing to apply, but `from` still needs to advance to `to`. Reaching
-        // here means `from` held a version we couldn't diff against (it wasn't an
-        // `AggregateHmrVersion`), so `diff_chunks_against` gave up and returned
-        // nothing. An empty `Partial` moves the session state forward so
-        // the *next* change produces a real diff; returning `Total` instead would
-        // force a needless full re-evaluation.
-        if chunk_updates.is_empty() && !has_new_chunks {
-            return Ok(ChunkListUpdateBuilder::default().build(to_ref).cell());
-        }
-
-        let mut builder = ChunkListUpdateBuilder::default();
-        for (_path, update) in chunk_updates {
-            match &*update {
-                Update::None => {}
-                Update::Missing | Update::Total(_) => {
-                    return Ok(Update::Total(TotalUpdate { to: to_ref }).cell());
-                }
-                Update::Partial(PartialUpdate { instruction, .. }) => {
-                    builder.add_instruction(instruction);
-                }
-            }
-        }
-
-        if builder.is_empty() && !has_new_chunks {
-            return Ok(Update::None.cell());
-        }
-
-        Ok(builder.build(to_ref).cell())
+        Ok(map.hmr_chunks_in_path(root))
     }
 
     /// Gets a list of all client HMR chunk names that can be subscribed to.

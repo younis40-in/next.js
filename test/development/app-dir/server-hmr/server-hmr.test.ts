@@ -45,11 +45,11 @@ describe('server-hmr', () => {
         )
 
         await retry(async () => {
-          expect(await readEvaluationLog()).toBe(initialEvaluationLog)
           expect(
             await browser.eval(() => (window as any).__didBlockHmrRequest)
           ).toBe(true)
         })
+        expect(await readEvaluationLog()).toBe(initialEvaluationLog)
 
         const response = await next.fetch('/lazy-rebuild')
         expect(await response.text()).toContain('updated')

@@ -213,18 +213,11 @@ interface IssuesUpdate extends BaseUpdate {
   type: 'issues'
 }
 
-interface EcmascriptMergedUpdate {
-  type: 'EcmascriptMergedUpdate'
-  chunks: { [moduleName: string]: { type: 'partial' } }
-  entries: { [moduleName: string]: { code: string; map: string; url: string } }
-}
-
 interface PartialUpdate extends BaseUpdate {
   type: 'partial'
-  instruction: {
-    type: 'ChunkListUpdate'
-    merged: EcmascriptMergedUpdate[] | undefined
-  }
+  // Same wire format the server pull returns: both come from Rust's
+  // `EcmascriptUpdateInstruction`.
+  instruction: NodeJsEcmascriptMergedUpdate | NodeJsChunkListUpdate
 }
 
 export type Update = IssuesUpdate | PartialUpdate
@@ -255,19 +248,11 @@ export interface NodeJsChunkListUpdate {
   chunks?: Record<string, { type: 'added' | 'deleted' | 'total' | 'partial' }>
 }
 
-export interface NodeJsPartialHmrUpdate extends BaseUpdate {
+/** The payload `__turbopack_server_hmr_apply__` takes. */
+export interface NodeJsPartialHmrUpdate {
   type: 'partial'
   instruction: NodeJsEcmascriptMergedUpdate | NodeJsChunkListUpdate
 }
-
-export interface NodeJsRestartHmrUpdate {
-  type: 'restart'
-}
-
-export type NodeJsHmrUpdate =
-  | IssuesUpdate
-  | NodeJsPartialHmrUpdate
-  | NodeJsRestartHmrUpdate
 
 /**
  * Opaque handle to the compiled-output version a server HMR pull produced. The
@@ -276,11 +261,19 @@ export type NodeJsHmrUpdate =
  */
 export type ServerHmrVersion = ExternalObject<NativeServerHmrVersion>
 
-export interface ServerHmrUpdate {
-  update: NodeJsHmrUpdate
-  /** Absent when nothing changed; keep the version you already hold. */
-  version?: ServerHmrVersion
-}
+/**
+ * Result of a server HMR pull. Restores the discrimination that `ServerHmrUpdate`
+ * in `next-api` has and `NapiServerHmrUpdate` has to flatten to cross napi.
+ */
+export type ServerHmrUpdate =
+  /** Nothing changed; keep the version you already hold. */
+  | { kind: 'none'; version?: ServerHmrVersion }
+  | { kind: 'restart'; version: ServerHmrVersion }
+  | {
+      kind: 'partial'
+      version: ServerHmrVersion
+      instruction: NodeJsEcmascriptMergedUpdate | NodeJsChunkListUpdate
+    }
 
 export interface HmrChunkNames {
   /** Relative paths to output chunks that can receive HMR updates (e.g., "server/chunks/ssr/..._.js") */

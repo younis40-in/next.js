@@ -1,4 +1,4 @@
-use anyhow::Result;
+use anyhow::{Result, bail};
 use turbo_rcstr::RcStr;
 use turbo_tasks::{
     FxIndexMap, FxIndexSet, NonLocalValue, ReadRef, ResolvedVc, TraitRef, TryJoinIterExt, Vc,
@@ -99,10 +99,10 @@ pub struct ChunkListUpdateBuilder {
 }
 
 impl ChunkListUpdateBuilder {
-    pub fn add_instruction(&mut self, instruction: &UpdateInstruction) {
-        let instruction = instruction
-            .downcast_ref::<EcmascriptUpdateInstruction>()
-            .expect("aggregate HMR only accepts ECMAScript update instructions");
+    pub fn add_instruction(&mut self, instruction: &UpdateInstruction) -> Result<()> {
+        let Some(instruction) = instruction.downcast_ref::<EcmascriptUpdateInstruction>() else {
+            bail!("aggregate HMR only accepts ECMAScript update instructions")
+        };
 
         match instruction {
             EcmascriptUpdateInstruction::ChunkList(update) => {
@@ -115,6 +115,8 @@ impl ChunkListUpdateBuilder {
             }
             EcmascriptUpdateInstruction::Merged(update) => self.push_merged(update),
         }
+
+        Ok(())
     }
 
     fn push_merged(&mut self, update: &EcmascriptMergedUpdate) {
@@ -125,16 +127,42 @@ impl ChunkListUpdateBuilder {
         self.chunks.is_empty() && self.merged.is_empty()
     }
 
-    pub fn build(self, to: TraitRef<Box<dyn Version>>) -> Update {
-        Update::Partial(PartialUpdate {
-            to,
-            instruction: ChunkListUpdate {
-                chunks: self.chunks,
-                merged: self.merged.into_iter().collect(),
-            }
-            .into_instruction(),
-        })
+    pub fn build(self) -> UpdateInstruction {
+        ChunkListUpdate {
+            chunks: self.chunks,
+            merged: self.merged.into_iter().collect(),
+        }
+        .into_instruction()
     }
+}
+
+/// Outcome of a server HMR pull: what the caller has to do, and the version to
+/// diff the next pull against.
+///
+/// Distinct from [`Update`] because that type cannot express "nothing to apply,
+/// but remember this version", which is what the first pull of a session and a
+/// newly appearing endpoint both produce.
+#[derive(Debug, TraceRawVcs, NonLocalValue)]
+pub enum ServerHmrUpdate {
+    /// Nothing changed and there is no new version to remember.
+    None,
+    /// Nothing to apply, but `to` has to be remembered so the next pull diffs
+    /// against it.
+    Version {
+        #[turbo_tasks(trace_ignore)]
+        to: TraitRef<Box<dyn Version>>,
+    },
+    /// Can't be applied incrementally; re-evaluate from disk.
+    Restart {
+        #[turbo_tasks(trace_ignore)]
+        to: TraitRef<Box<dyn Version>>,
+    },
+    /// `instruction` patches the running module graph in place.
+    Partial {
+        #[turbo_tasks(trace_ignore)]
+        to: TraitRef<Box<dyn Version>>,
+        instruction: UpdateInstruction,
+    },
 }
 
 /// Per-chunk [`Update`]s computed against an `AggregateHmrVersion` snapshot.
@@ -195,6 +223,7 @@ pub async fn diff_chunks_against(
 
 #[cfg(test)]
 mod tests {
+    use anyhow::Result;
     use turbo_tasks::{FxIndexMap, FxIndexSet};
     use turbopack_core::update_instruction::UpdateInstruction;
     use turbopack_ecmascript::chunk_list::{
@@ -221,26 +250,27 @@ mod tests {
     }
 
     #[test]
-    fn deduplicates_merged_updates_in_first_seen_order() {
+    fn deduplicates_merged_updates_in_first_seen_order() -> Result<()> {
         let first = merged("first.js");
         let second = merged("second.js");
         let mut builder = ChunkListUpdateBuilder::default();
 
         builder.add_instruction(&UpdateInstruction::new(
             EcmascriptUpdateInstruction::Merged(first.clone()),
-        ));
+        ))?;
         builder.add_instruction(&UpdateInstruction::new(
             EcmascriptUpdateInstruction::Merged(second.clone()),
-        ));
+        ))?;
         builder.add_instruction(&UpdateInstruction::new(
             EcmascriptUpdateInstruction::Merged(first.clone()),
-        ));
+        ))?;
 
         assert_eq!(builder.merged, FxIndexSet::from_iter([first, second]));
+        Ok(())
     }
 
     #[test]
-    fn chunk_updates_use_last_writer_and_stable_order() {
+    fn chunk_updates_use_last_writer_and_stable_order() -> Result<()> {
         let mut builder = ChunkListUpdateBuilder::default();
         let first = ChunkListUpdate {
             chunks: FxIndexMap::from_iter([
@@ -257,8 +287,8 @@ mod tests {
             merged: vec![],
         };
 
-        builder.add_instruction(&first.into_instruction());
-        builder.add_instruction(&second.into_instruction());
+        builder.add_instruction(&first.into_instruction())?;
+        builder.add_instruction(&second.into_instruction())?;
 
         assert_eq!(
             builder
@@ -269,5 +299,88 @@ mod tests {
             ["a.js", "b.js", "c.js"]
         );
         assert_eq!(builder.chunks["a.js"], ChunkUpdate::Deleted);
+        Ok(())
     }
+}
+
+/// Diffs `chunks` against `from` and folds the per-chunk updates into one
+/// [`ServerHmrUpdate`].
+///
+/// Deliberately *not* a `#[turbo_tasks::function]`. Keyed on `from`, it would
+/// mint a task per pull; those tasks would be reachable from a `root` wrapper
+/// whose activeness outlives the pull, so each superseded one would re-execute
+/// on every later change. Run here instead, as a child of the caller's transient
+/// once-task, the work is dropped when that task ends.
+///
+/// Each tracked entry chunk's own update is a `ChunkListUpdate` (carrying the
+/// module deltas for its shared chunks via the merger) or a bare
+/// `EcmascriptMergedUpdate`; both are folded into one `ChunkListUpdate` that the
+/// runtime applies exactly as it would a single chunk list.
+///
+/// All-or-nothing restart: any chunk needing `Total`/`Missing` escalates the
+/// whole batch to `Total` (the runtime can't partially restart). New chunks
+/// absent from `from` are skipped; the runtime require()s them on demand.
+///
+/// `from` is supplied by the caller, which owns the last version it was handed
+/// (see the returned update's `to`). A caller with no version yet passes
+/// [`turbopack_core::version::NotFoundVersion`]: nothing diffs against it, so
+/// that pull reports no changes and only serves to hand back the current
+/// version.
+pub async fn compute_server_hmr_update(
+    chunks: &[HmrChunkWithContent],
+    from: Vc<Box<dyn Version>>,
+) -> Result<ServerHmrUpdate> {
+    // No chunks to diff yet (e.g. before any endpoints have been written).
+    if chunks.is_empty() {
+        return Ok(ServerHmrUpdate::None);
+    }
+
+    // Build `to` up front so we can return it on every escape hatch below.
+    let to_aggregate = AggregateHmrVersion::from_chunks(chunks).await?;
+    let to_ref = Vc::upcast::<Box<dyn Version>>(to_aggregate)
+        .into_trait_ref()
+        .await?;
+
+    let DiffResult {
+        chunk_updates,
+        has_new_chunks,
+    } = diff_chunks_against(chunks, from).await?;
+
+    // Nothing to apply, but `from` still needs to advance to `to`. Reaching here
+    // means `from` held a version we couldn't diff against (it wasn't an
+    // `AggregateHmrVersion`), so `diff_chunks_against` gave up and returned
+    // nothing. Advancing the caller forward makes the *next* change produce a
+    // real diff; reporting a restart instead would force a needless full
+    // re-evaluation.
+    if chunk_updates.is_empty() && !has_new_chunks {
+        return Ok(ServerHmrUpdate::Version { to: to_ref });
+    }
+
+    let mut builder = ChunkListUpdateBuilder::default();
+    for (_path, update) in chunk_updates {
+        match &*update {
+            Update::None => {}
+            Update::Missing | Update::Total(_) => {
+                return Ok(ServerHmrUpdate::Restart { to: to_ref });
+            }
+            Update::Partial(PartialUpdate { instruction, .. }) => {
+                builder.add_instruction(instruction)?;
+            }
+        }
+    }
+
+    // A new chunk still advances the version even with nothing to apply: the
+    // runtime require()s it on demand.
+    if builder.is_empty() {
+        return Ok(if has_new_chunks {
+            ServerHmrUpdate::Version { to: to_ref }
+        } else {
+            ServerHmrUpdate::None
+        });
+    }
+
+    Ok(ServerHmrUpdate::Partial {
+        to: to_ref,
+        instruction: builder.build(),
+    })
 }

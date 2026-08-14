@@ -19,6 +19,7 @@ use napi::{
 };
 use napi_derive::napi;
 use next_api::{
+    aggregate_hmr::{HmrChunksWithContent, ServerHmrUpdate, compute_server_hmr_update},
     entrypoints::Entrypoints,
     next_server_nft::next_server_nft_assets,
     operation::{
@@ -1849,33 +1850,41 @@ async fn hmr_update_with_issues_operation(
     .cell())
 }
 
-#[turbo_tasks::function(operation, root)]
-fn project_server_hmr_update_operation(
-    project: ResolvedVc<Project>,
-    from: ResolvedVc<Box<dyn Version>>,
-) -> Vc<Update> {
-    project.server_hmr_update(*from)
+#[turbo_tasks::value(serialization = "skip")]
+struct ServerHmrChunksWithIssues {
+    chunks: ReadRef<HmrChunksWithContent>,
+    issues: Arc<Vec<ReadRef<PlainIssue>>>,
+    effects: Arc<Effects>,
 }
 
-#[tracing::instrument(level = "info", name = "server hmr update", skip_all)]
 #[turbo_tasks::function(operation, root)]
-async fn server_hmr_update_with_issues_operation(
+fn project_server_hmr_chunks_operation(project: ResolvedVc<Project>) -> Vc<HmrChunksWithContent> {
+    project.server_hmr_chunks()
+}
+
+/// Only the chunk snapshot is a task; the diff against the caller's version is
+/// not. Keying a task on that version would create one per pull, and because
+/// this wrapper is `root` (a strongly consistent read of a non-root task
+/// panics), its activeness would outlive the pull and re-execute every
+/// superseded one on each later change.
+#[tracing::instrument(level = "info", name = "server hmr chunks", skip_all)]
+#[turbo_tasks::function(operation, root)]
+async fn server_hmr_chunks_with_issues_operation(
     project: ResolvedVc<Project>,
-    from: ResolvedVc<Box<dyn Version>>,
-) -> Result<Vc<HmrUpdateWithIssues>> {
-    tracing::info!("server hmr update");
-    let update_op = project_server_hmr_update_operation(project, from);
+) -> Result<Vc<ServerHmrChunksWithIssues>> {
+    tracing::info!("server hmr chunks");
+    let chunks_op = project_server_hmr_chunks_operation(project);
     // See `hmr_update_with_issues_operation`: the JS consumer relies on this
     // read *throwing* on build-graph failures; don't swallow errors.
-    let update = update_op
+    let chunks = chunks_op
         .read_strongly_consistent()
         .final_read_hint()
         .await?;
     let filter = project.issue_filter().await?;
-    let issues = get_issues(update_op, &filter).await?;
-    let effects = Arc::new(take_effects(update_op).await?);
-    Ok(HmrUpdateWithIssues {
-        update,
+    let issues = get_issues(chunks_op, &filter).await?;
+    let effects = Arc::new(take_effects(chunks_op).await?);
+    Ok(ServerHmrChunksWithIssues {
+        chunks,
         issues,
         effects,
     }
@@ -1891,12 +1900,54 @@ async fn server_hmr_update_with_issues_operation(
 /// cell belonging to a task that has since gone away.
 pub struct ServerHmrVersion(TraitRef<Box<dyn Version>>);
 
+/// What the caller has to do with a server HMR pull's result.
+#[napi(string_enum = "lowercase")]
+pub enum ServerHmrUpdateKind {
+    /// Nothing to apply: either nothing changed since `from`, or the update only
+    /// advances the version (the session's first pull, or a new endpoint). A
+    /// `version` may still be handed back to diff the next pull against.
+    None,
+    /// `instruction` patches the running module graph in place.
+    Partial,
+    /// The update can't be applied incrementally; re-evaluate from disk.
+    Restart,
+}
+
 #[napi(object, object_from_js = false)]
 pub struct NapiServerHmrUpdate {
-    pub update: serde_json::Value,
+    pub kind: ServerHmrUpdateKind,
+    /// The instruction for the Node.js runtime to apply. Opaque here because
+    /// only that runtime interprets it. Present for `Partial` only.
+    ///
+    /// `unknown` rather than the `any` napi infers for a JSON value, so the
+    /// consumer has to narrow it (`ServerHmrUpdate` in `swc/types.ts`) instead
+    /// of silently treating it as whatever it likes.
+    #[napi(ts_type = "unknown")]
+    pub instruction: Option<serde_json::Value>,
     /// Absent when the update carries no new version (nothing changed), in
     /// which case the caller keeps the one it already has.
     pub version: Option<External<ServerHmrVersion>>,
+}
+
+impl NapiServerHmrUpdate {
+    /// Flattens [`ServerHmrUpdate`] for the napi boundary, which has no way to
+    /// express a discriminated union. `swc/types.ts` restores the discrimination.
+    fn new(update: &ServerHmrUpdate) -> Result<Self> {
+        let (kind, to, instruction) = match update {
+            ServerHmrUpdate::None => (ServerHmrUpdateKind::None, None, None),
+            ServerHmrUpdate::Version { to } => (ServerHmrUpdateKind::None, Some(to), None),
+            ServerHmrUpdate::Restart { to } => (ServerHmrUpdateKind::Restart, Some(to), None),
+            ServerHmrUpdate::Partial { to, instruction } => {
+                (ServerHmrUpdateKind::Partial, Some(to), Some(instruction))
+            }
+        };
+
+        Ok(Self {
+            kind,
+            instruction: instruction.map(serde_json::to_value).transpose()?,
+            version: to.map(|to| External::new(ServerHmrVersion(to.clone()))),
+        })
+    }
 }
 
 #[tracing::instrument(level = "info", name = "get server HMR update", skip_all)]
@@ -1909,63 +1960,39 @@ pub async fn project_get_server_hmr_update(
     let turbo_tasks = project.turbopack_ctx.turbo_tasks();
     let from = from.map(|from| from.0.clone());
 
-    let update = turbo_tasks
+    let (update, issues) = turbo_tasks
         .run_once(async move {
             // HACK(bgw): Remove this unmark call
             unmark_top_level_task_may_leak_eventually_consistent_state();
             let project = container.project().to_resolved().await?;
-            // No `from` on the first pull of a session. Nothing diffs against
+            // HACK(bgw): Remove this mark call
+            mark_top_level_task();
+            let chunks_op = server_hmr_chunks_with_issues_operation(project);
+            let read =
+                read_strongly_consistent_and_apply_effects(chunks_op, |v| &v.effects).await?;
+            // HACK(bgw): Remove this unmark call
+            unmark_top_level_task_may_leak_eventually_consistent_state();
+            let ServerHmrChunksWithIssues { chunks, issues, .. } = &*read;
+            // No `from` on a caller's first pull. Nothing diffs against
             // `NotFoundVersion`, so that pull reports no changes and exists only
             // to hand back the current version.
             let from = match from {
-                Some(from) => TraitRef::cell(from).to_resolved().await?,
-                None => ResolvedVc::upcast(NotFoundVersion::new().to_resolved().await?),
+                Some(from) => TraitRef::cell(from),
+                None => Vc::upcast(NotFoundVersion::new()),
             };
-            // HACK(bgw): Remove this mark call
-            mark_top_level_task();
-            let update_op = server_hmr_update_with_issues_operation(project, from);
-            let read =
-                read_strongly_consistent_and_apply_effects(update_op, |v| &v.effects).await?;
-            // HACK(bgw): Remove this unmark call
-            unmark_top_level_task_may_leak_eventually_consistent_state();
-            let HmrUpdateWithIssues { update, issues, .. } = &*read;
-            Ok((update.clone(), issues.clone()))
+            // Diffed here rather than inside the operation above, so that no task
+            // is keyed on `from`. See `compute_server_hmr_update`.
+            let update = compute_server_hmr_update(chunks, from).await?;
+            Ok((update, issues.clone()))
         })
         .await
         .map_err(|e| napi::Error::from_reason(PrettyPrintError(&e).to_string()))?;
 
-    let (update, issues) = update;
-
-    let update_issues = issues
-        .iter()
-        .map(|issue| Issue::from(&**issue))
-        .collect::<Vec<_>>();
-    let identifier = ResourceIdentifier {
-        path: rcstr!("__next_all_hmr__"),
-        headers: None,
-    };
-    let instruction = match &*update {
-        Update::Missing | Update::Total(_) => {
-            ClientUpdateInstruction::restart(&identifier, &update_issues)
-        }
-        Update::Partial(update) => {
-            ClientUpdateInstruction::partial(&identifier, &update.instruction, &update_issues)
-        }
-        Update::None => ClientUpdateInstruction::issues(&identifier, &update_issues),
-    };
-    let version = match &*update {
-        Update::Missing | Update::None => None,
-        Update::Total(TotalUpdate { to }) | Update::Partial(PartialUpdate { to, .. }) => {
-            Some(External::new(ServerHmrVersion(to.clone())))
-        }
-    };
+    let result = NapiServerHmrUpdate::new(&update)
+        .map_err(|error| napi::Error::from_reason(PrettyPrintError(&error).to_string()))?;
 
     Ok(TurbopackResult {
-        result: NapiServerHmrUpdate {
-            update: serde_json::to_value(&instruction)
-                .map_err(|error| napi::Error::from_reason(error.to_string()))?,
-            version,
-        },
+        result,
         issues: issues
             .iter()
             .map(|issue| NapiIssue::from(&**issue))
