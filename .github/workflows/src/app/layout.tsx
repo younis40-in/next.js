@@ -22,7 +22,8 @@ export default function RootLayout({
     <html lang="ar" dir="rtl">
       <body className={`${cairo.variable} font-sans bg-slate-50 text-slate-900 antialiased min-h-screen flex flex-col`}>
         {children}
-      </body>
+      </body<meta name="google-site-verification" content="95b3CEDyi_XJgy6RFSuOsohAZbpmWW3o4oBjSHxzkdo" />
+>
     </html>
   );
 }
