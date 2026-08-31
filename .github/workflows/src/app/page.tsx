@@ -45,7 +45,7 @@ export default function Home() {
           </div>
         </div>
       </header>
-
+<meta name="google-site-verification" content="95b3CEDyi_XJgy6RFSuOsohAZbpmWW3o4oBjSHxzkdo" />
       {/* Hero Section */}
       <section className="relative overflow-hidden bg-gradient-to-b from-blue-50/50 via-white to-slate-50 py-20 lg:py-28 border-b border-slate-200/60">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 text-center relative z-10">
