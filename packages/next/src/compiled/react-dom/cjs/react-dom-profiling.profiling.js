@@ -2166,7 +2166,8 @@ var KeyboardEventInterface = assign({}, UIEventInterface, {
   SyntheticWheelEvent = createSyntheticEvent(WheelEventInterface),
   ToggleEventInterface = assign({}, EventInterface, {
     newState: 0,
-    oldState: 0
+    oldState: 0,
+    source: 0
   }),
   SyntheticToggleEvent = createSyntheticEvent(ToggleEventInterface),
   END_KEYCODES = [9, 13, 27, 32],
@@ -11785,9 +11786,13 @@ function commitMutationEffectsOnFiber(finishedWork, root, lanes) {
     case 21:
       break;
     case 7:
-      current &&
-        null !== current.stateNode &&
-        (current.stateNode._fragmentFiber = finishedWork);
+      flags & 512 &&
+        (offscreenSubtreeWasHidden ||
+          null === current ||
+          safelyDetachRef(current, current.return)),
+        current &&
+          null !== current.stateNode &&
+          (current.stateNode._fragmentFiber = finishedWork);
     default:
       recursivelyTraverseMutationEffects(root, finishedWork, lanes),
         commitReconciliationEffects(finishedWork);
@@ -17961,7 +17966,7 @@ function getAttachOptions(opts) {
 }
 function normalizeListenerOptions(opts) {
   return null == opts
-    ? "0"
+    ? "c=0"
     : "boolean" === typeof opts
       ? "c=" + (opts ? "1" : "0")
       : "c=" + (opts.capture ? "1" : "0");
@@ -20361,14 +20366,14 @@ ReactDOMHydrationRoot.prototype.unstable_scheduleHydration = function (target) {
 };
 var isomorphicReactPackageVersion$jscomp$inline_2344 = React.version;
 if (
-  "19.3.0-canary-eb8feb71-20260814" !==
+  "19.3.0-canary-29d9d318-20260826" !==
   isomorphicReactPackageVersion$jscomp$inline_2344
 )
   throw Error(
     formatProdErrorMessage(
       527,
       isomorphicReactPackageVersion$jscomp$inline_2344,
-      "19.3.0-canary-eb8feb71-20260814"
+      "19.3.0-canary-29d9d318-20260826"
     )
   );
 ReactDOMSharedInternals.findDOMNode = function (componentOrElement) {
@@ -20390,10 +20395,10 @@ ReactDOMSharedInternals.findDOMNode = function (componentOrElement) {
 };
 var internals$jscomp$inline_2900 = {
   bundleType: 0,
-  version: "19.3.0-canary-eb8feb71-20260814",
+  version: "19.3.0-canary-29d9d318-20260826",
   rendererPackageName: "react-dom",
   currentDispatcherRef: ReactSharedInternals,
-  reconcilerVersion: "19.3.0-canary-eb8feb71-20260814"
+  reconcilerVersion: "19.3.0-canary-29d9d318-20260826"
 };
 if ("undefined" !== typeof __REACT_DEVTOOLS_GLOBAL_HOOK__) {
   var hook$jscomp$inline_2901 = __REACT_DEVTOOLS_GLOBAL_HOOK__;
@@ -20664,7 +20669,7 @@ exports.useFormState = function (action, initialState, permalink) {
 exports.useFormStatus = function () {
   return ReactSharedInternals.H.useHostTransitionStatus();
 };
-exports.version = "19.3.0-canary-eb8feb71-20260814";
+exports.version = "19.3.0-canary-29d9d318-20260826";
 "undefined" !== typeof __REACT_DEVTOOLS_GLOBAL_HOOK__ &&
   "function" ===
     typeof __REACT_DEVTOOLS_GLOBAL_HOOK__.registerInternalModuleStop &&

@@ -16835,9 +16835,13 @@
         case 21:
           break;
         case 7:
-          current &&
-            null !== current.stateNode &&
-            (current.stateNode._fragmentFiber = finishedWork);
+          flags & 512 &&
+            (offscreenSubtreeWasHidden ||
+              null === current ||
+              safelyDetachRef(current, current.return)),
+            current &&
+              null !== current.stateNode &&
+              (current.stateNode._fragmentFiber = finishedWork);
         default:
           recursivelyTraverseMutationEffects(root, finishedWork, lanes),
             commitReconciliationEffects(finishedWork);
@@ -26894,7 +26898,7 @@
     }
     function normalizeListenerOptions(opts) {
       return null == opts
-        ? "0"
+        ? "c=0"
         : "boolean" === typeof opts
           ? "c=" + (opts ? "1" : "0")
           : "c=" + (opts.capture ? "1" : "0");
@@ -30360,7 +30364,8 @@
       SyntheticWheelEvent = createSyntheticEvent(WheelEventInterface),
       ToggleEventInterface = assign({}, EventInterface, {
         newState: 0,
-        oldState: 0
+        oldState: 0,
+        source: 0
       }),
       SyntheticToggleEvent = createSyntheticEvent(ToggleEventInterface),
       END_KEYCODES = [9, 13, 27, 32],
@@ -33422,11 +33427,11 @@
     };
     (function () {
       var isomorphicReactPackageVersion = React.version;
-      if ("19.3.0-experimental-eb8feb71-20260814" !== isomorphicReactPackageVersion)
+      if ("19.3.0-experimental-29d9d318-20260826" !== isomorphicReactPackageVersion)
         throw Error(
           'Incompatible React versions: The "react" and "react-dom" packages must have the exact same version. Instead got:\n  - react:      ' +
             (isomorphicReactPackageVersion +
-              "\n  - react-dom:  19.3.0-experimental-eb8feb71-20260814\nLearn more: https://react.dev/warnings/version-mismatch")
+              "\n  - react-dom:  19.3.0-experimental-29d9d318-20260826\nLearn more: https://react.dev/warnings/version-mismatch")
         );
     })();
     ("function" === typeof Map &&
@@ -33463,10 +33468,10 @@
       !(function () {
         var internals = {
           bundleType: 1,
-          version: "19.3.0-experimental-eb8feb71-20260814",
+          version: "19.3.0-experimental-29d9d318-20260826",
           rendererPackageName: "react-dom",
           currentDispatcherRef: ReactSharedInternals,
-          reconcilerVersion: "19.3.0-experimental-eb8feb71-20260814"
+          reconcilerVersion: "19.3.0-experimental-29d9d318-20260826"
         };
         internals.overrideHookState = overrideHookState;
         internals.overrideHookStateDeletePath = overrideHookStateDeletePath;
@@ -33956,7 +33961,7 @@
     exports.useFormStatus = function () {
       return resolveDispatcher().useHostTransitionStatus();
     };
-    exports.version = "19.3.0-experimental-eb8feb71-20260814";
+    exports.version = "19.3.0-experimental-29d9d318-20260826";
     "undefined" !== typeof __REACT_DEVTOOLS_GLOBAL_HOOK__ &&
       "function" ===
         typeof __REACT_DEVTOOLS_GLOBAL_HOOK__.registerInternalModuleStop &&
